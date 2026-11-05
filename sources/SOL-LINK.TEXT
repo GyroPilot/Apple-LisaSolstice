@@ -1,0 +1,29 @@
+$EXEC
+${ REV D  17-Oct-2026  1.1: FNBUS.OBJ and NET.OBJ.                        }
+${ REV A  10-Oct-2026  First build.                                          }
+${==========================================================================}
+${ SOL-LINK.TEXT -- link LisaSolstice (REV A: + ASTRO, VIEW and IOSFPLIB for the reals).  Intrinsic units (HwInt,           }
+${ QuickDraw, the WM units, AlertMgr, SysCall ...) are NOT named: the      }
+${ linker finds them through INTRINSIC.LIB.  Same recipe as LFU-LINK.      }
+${==========================================================================}
+F{ilemgr}D{elete}SOL/SOL.OBJ  Y{es}
+        Q{uit}
+${                                                                          }
+L{inker}SOL/MAIN.OBJ
+SOL/GLOBALS.OBJ
+SOL/UNIT.OBJ
+SOL/FNBUS.OBJ
+SOL/NET.OBJ
+SOL/ASTRO.OBJ
+SOL/VIEW.OBJ
+SOL/PIC.OBJ
+SOL/MAP.OBJ
+SOL/PHO.OBJ
+IOSFPLIB.OBJ
+IOSPASLIB.OBJ
+SYS1LIB.OBJ
+SYS2LIB.OBJ
+{end of the input list - this comment-only line is the blank answer}
+{no listing file - second blank answer}
+SOL/SOL.OBJ
+$ENDEXEC

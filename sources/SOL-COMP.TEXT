@@ -1,0 +1,50 @@
+$EXEC
+${ REV D  17-Oct-2026  1.1: FNBUS (LisaFuji's) and NET added.             }
+${ REV A  10-Oct-2026  First build.                                          }
+${==========================================================================}
+${ SOL-COMP.TEXT -- compile LisaSolstice (from LisaTwinClock REV K): GLOBALS,}
+${ UNIT, FNBUS, NET, then ASTRO and VIEW (REV A 2-Nov-2026), then MAIN.  }
+${==========================================================================}
+F{ilemgr}D{elete}SOL/UNIT.OBJ  Y{es}
+        D{elete}SOL/GLOBALS.OBJ  Y{es}
+        D{elete}SOL/FNBUS.OBJ  Y{es}
+        D{elete}SOL/NET.OBJ  Y{es}
+        D{elete}SOL/ASTRO.OBJ  Y{es}
+        D{elete}SOL/VIEW.OBJ  Y{es}
+        D{elete}SOL/PIC.OBJ  Y{es}
+        D{elete}SOL/MAP.OBJ  Y{es}
+        D{elete}SOL/PHO.OBJ  Y{es}
+        D{elete}SOL/MAIN.OBJ  Y{es}
+        Q{uit}
+${                                                                          }
+P{ascal Compile}SOL/GLOBALS.TEXT
+{no listing file - this comment-only line is the [RETURN] answer}
+SOL/GLOBALS.OBJ
+P{ascal Compile}SOL/UNIT.TEXT
+{no listing file}
+SOL/UNIT.OBJ
+P{ascal Compile}SOL/FNBUS.TEXT
+{no listing file}
+SOL/FNBUS.OBJ
+P{ascal Compile}SOL/NET.TEXT
+{no listing file}
+SOL/NET.OBJ
+P{ascal Compile}SOL/ASTRO.TEXT
+{no listing file}
+SOL/ASTRO.OBJ
+P{ascal Compile}SOL/VIEW.TEXT
+{no listing file}
+SOL/VIEW.OBJ
+P{ascal Compile}SOL/PIC.TEXT
+{no listing file}
+SOL/PIC.OBJ
+P{ascal Compile}SOL/MAP.TEXT
+{no listing file}
+SOL/MAP.OBJ
+P{ascal Compile}SOL/PHO.TEXT
+{no listing file}
+SOL/PHO.OBJ
+P{ascal Compile}SOL/MAIN.TEXT
+{no listing file}
+SOL/MAIN.OBJ
+$ENDEXEC

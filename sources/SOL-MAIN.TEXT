@@ -1,0 +1,1751 @@
+program LisaSolstice;
+
+{ SOL-MAIN.TEXT -- LisaSolstice (tool 419326)  ***  0.1 REV A  2-Nov-2026 ***}
+{ How long until the next solstice and equinox, the Earth's orbit and     }
+{ tilt, where the Sun is, sunrise and sunset in your town, and fun facts. }
+{ It stands alone: the twin-year clock of LisaTwinClock REV K (tested on  }
+{ the 2/10, 1 Nov 2026) is built in -- S sets the clock by hand, N from a }
+{ FujiNet, LisaNet or ESPFuji ESProFile.  The pages and pictures are in   }
+{ SOL-VIEW, the astronomy in SOL-ASTRO; the new main-program code is in   }
+{ segment SOLSeas.                                                        }
+
+{ (forked from LisaTwinClock; its history follows)                      }
+{ REV D  17-Oct-2026  1.1: Set from the Network (N, Network menu): the }
+{                      FujiNet's clock, or timeapi.io for your town   }
+{                      (LisaFuji's HOMETOWN.DATA) or a typed time     }
+{                      zone, over an RS-232 FujiNet on Serial B, with }
+{                      LisaFuji's FnBus unit.  NOT yet compiled.      }
+{ REV A  10-Oct-2026  First build.  NOT yet compiled on a Lisa.          }
+{                                                                        }
+{ THIS LINE IS THE VERSION CHECK.  If the About box disagrees with the  }
+{ number above, a stale file was sent.  (The authoritative constant is  }
+{ solVersion in SOL-GLOBALS.TEXT; keep the two in step.)                 }
+{                                                                        }
+{ Tool 419326 (pencilled in; not yet reserved on the LisaList2 list).   }
+{ Skeleton: LFU-MAIN REV I (LisaFileMover 1.1) -- the callbacks, the    }
+{ status pane, the typed prompt, the event loop and Initialize are      }
+{ that code with the file lists removed.                                 }
+{                                                                        }
+{ WHAT IT DOES                                                           }
+{   Set Clock ... (S)  -- asks for today's real year, month, day, hour  }
+{                         and minute, one short line each, with the     }
+{                         last-used or current value offered in         }
+{                         brackets.  Shows "Today" and "Lisa will be    }
+{                         set to" (the twin year), asks OK / Cancel,    }
+{                         sets the clock, reads it back, and saves the  }
+{                         real year in TWINYEAR.DATA beside the tool.   }
+{   Show Lisa Clock (C) -- what the clock says, and the real date when  }
+{                         the note file matches the clock's year.       }
+{   Help (H, T)        -- how to use it; what a twin year is.           }
+{                                                                        }
+{ All calendar work, the clock calls and the note file are in SolUnit.  }
+{ HwInt is first in the uses list, as in Apple's LisaTerminal; SolUnit  }
+{ needs it for DateTime and SetDateTime.                                 }
+
+uses (*$U HwInt.obj *)     HwInt,
+     (*$U UnitStd.obj *)   UnitStd,
+     (*$U UnitHz.obj *)    UnitHz,
+     (*$U Storage.obj *)   Storage,
+     (*$U QuickDraw.obj *) QuickDraw,
+     (*$U Fontmgr.obj *)   FontMgr,
+     (*$U SysCall.obj *)   SysCall,
+     (*$U wm.events.obj *) Events,
+     (*$U wm.folders.obj *) Folders,
+     (*$U wm.menus.obj *)  Menus,
+     (*$U AlertMgr.obj *)  AlertMgr,
+     (*$U WMLstd.obj *)    WMLstd,
+     (*$U WMlCrs.obj *)    WMLCrs,
+     (*$U FilerComm.obj *) FilerComm,
+     (*$U SOL/GLOBALS.OBJ *) SolGlobals,
+     (*$U SOL/UNIT.OBJ *)    SolUnit,
+     (*$U SOL/FNBUS.OBJ *)   FnBus,
+     (*$U SOL/NET.OBJ *)     SolNet,
+     (*$U SOL/ASTRO.OBJ *)   SolAstro,
+     (*$U SOL/VIEW.OBJ *)    SolView,
+     (*$U SOL/PIC.OBJ *)     SolPic,
+     (*$U SOL/MAP.OBJ *)     SolMap,
+     (*$U SOL/PHO.OBJ *)     SolPho;
+
+var
+   termErr : integer;
+
+{------------------------------------------------------------------------}
+{ The three required callbacks.                                          }
+{------------------------------------------------------------------------}
+
+function OutOfHeapSpace (hz : THz; bytesNeeded : integer) : integer;
+begin
+   OutOfHeapSpace := 0
+end;
+
+procedure AlertFailed;
+var err : integer;
+begin
+   if initing then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      Halt
+   end
+end;
+
+procedure LastWishes (environPtr : p_env_blk; excepDataPtr : p_ex_data);
+begin
+   ImDying;
+   Halt
+end;
+
+{------------------------------------------------------------------------}
+{ Menus.                                                                 }
+{------------------------------------------------------------------------}
+
+procedure PutUpMenus;
+var m : integer;
+begin
+   ClearMenuBar;
+   for m := mFile to lastBarMenu do
+      InsertMenu(myMenus[m], 0);
+   DrawMenuBar
+end;
+
+{------------------------------------------------------------------------}
+{ The status pane.                                                       }
+{------------------------------------------------------------------------}
+
+procedure Clip (var big : Str255; var out : StatStr);
+{ Copy at most 80 characters.  HARDWARE LESSON (INS REV B): COPY(big,   }
+{ 1, 80) with LENGTH(big) < 80 returned an EMPTY string on the Lisa.    }
+var n : integer;
+begin
+   n := length(big);
+   if n > 80 then n := 80;
+   if n = 0 then
+      out := ''
+   else
+      out := copy(big, 1, n)
+end;
+
+procedure DrawShow;
+{ Repaint the whole status pane; under the lines, the orbit or the tilt }
+{ picture when one is showing (LisaSolstice).                           }
+var fi : FontInfo;
+    i  : integer;
+    r  : Rect;
+begin
+   if myWindow = nil then
+      exit(DrawShow);
+   SetPort(myWindow);
+   ClipRect(myWindow^.portRect);        { FolderSize left the clip at the old size (Checkers SyncPort) }
+   EraseRect(myWindow^.portRect);
+   GetFontInfo(fi);
+   for i := 1 to statCnt do begin
+      MoveTo(10, 6 + (i - 1) * lineHt + fi.ascent);
+      DrawString(statLine[i])
+   end;
+   if pageMode = pgSplash then
+      SpDraw(10, 8 + statCnt * lineHt)
+   else if pageMode = pgPhoto then begin
+      { REV B: a picture from the talk, centred under its two lines }
+      r := myWindow^.portRect;
+      i := (r.right - r.left - PhW(phNo)) div 2;
+      if i < 10 then i := 10;
+      PhDraw(phNo, i, 10 + statCnt * lineHt)
+   end
+   else if pageMode = pgTime then begin
+      r := myWindow^.portRect;
+      r.top := r.top + 10 + statCnt * lineHt;
+      r.left := r.left + 6;
+      r.right := r.right - 6;
+      r.bottom := r.bottom - 6;
+      VwTime(tlYear, r)
+   end
+   else if pageMode = pgMap then begin
+      { day and night now (from Solstice for Mac) }
+      i := 12 + statCnt * lineHt;
+      SaSun(pgDay, pgFr);
+      SmDraw(74, i, saDecl, saSubLn, vwLat, vwLon);
+      MoveTo(10, i + smH + 20);
+      DrawString(mpL1);
+      MoveTo(10, i + smH + 20 + lineHt);
+      DrawString(mpL2)
+   end
+   else if pageMode <> pgText then begin
+      r := myWindow^.portRect;
+      r.top := r.top + 10 + statCnt * lineHt;
+      r.left := r.left + 6;
+      r.right := r.right - 6;
+      r.bottom := r.bottom - 6;
+      if pageMode = pgOrbit then
+         VwOrbit(pgDay, pgFr, r)
+      else
+         VwTilt(pgDay, pgFr, r)
+   end
+end;
+
+procedure DrawOne (i : integer);
+{ REV E.  Repaint pane line i only: no flash while typing (Tim, 2/10,  }
+{ 19-Oct; LisaFuji has had this since 16-Oct).                         }
+var fi : FontInfo;
+    r  : Rect;
+begin
+   if myWindow = nil then
+      exit(DrawOne);
+   SetPort(myWindow);
+   ClipRect(myWindow^.portRect);        { FolderSize left the clip at the old size (Checkers SyncPort) }
+   r := myWindow^.portRect;
+   r.top := 6 + (i - 1) * lineHt;
+   r.bottom := r.top + lineHt;
+   EraseRect(r);
+   GetFontInfo(fi);
+   MoveTo(10, 6 + (i - 1) * lineHt + fi.ascent);
+   DrawString(statLine[i])
+end;
+
+procedure AddLine (var s : StatStr);
+{ Append a line; scroll the list up when full; repaint. }
+var i : integer;
+begin
+   if statCnt < maxLines then
+      statCnt := statCnt + 1
+   else
+      for i := 1 to maxLines - 1 do
+         statLine[i] := statLine[i + 1];
+   statLine[statCnt] := s;
+   if not quiet then DrawShow
+end;
+
+procedure SetLast (var s : StatStr);
+{ Replace the last line and repaint that line only (REV E). }
+begin
+   if statCnt = 0 then
+      AddLine(s)
+   else begin
+      statLine[statCnt] := s;
+      DrawOne(statCnt)
+   end
+end;
+
+procedure AddBig (var big : Str255);
+{ Clip a long string and append it. }
+var out : StatStr;
+begin
+   Clip(big, out);
+   AddLine(out)
+end;
+
+procedure LogMode;
+{ Clear the pane for a fresh run of lines (and drop any picture). }
+begin
+   statCnt := 0;
+   pageMode := pgText
+end;
+
+procedure SayDate (var lead : StatStr; y, doy, h, mi : integer);
+{ One line: lead, then "Saturday, October 10, 1987   14:05".  y is the  }
+{ year whose calendar is used AND the year printed; doy is the day of   }
+{ that year.                                                             }
+var m, d, wd : integer;
+    part     : Str255;
+    mins     : Str255;
+    big      : Str255;
+begin
+   TwMonDay(y, doy, m, d);
+   wd := TwWkDay(y, m, d);
+   TwDayNm(wd, part);
+   big := concat(lead, part);
+   TwMonNm(m, part);
+   big := concat(big, concat(', ', part));
+   TwNum(d, part);
+   big := concat(big, concat(' ', part));
+   TwNum(y, part);
+   big := concat(big, concat(', ', part));
+   TwNum(h, part);
+   Tw2Dig(mi, mins);
+   big := concat(big, concat('   ', part));
+   big := concat(big, concat(':', mins));
+   AddBig(big)
+end;
+
+{------------------------------------------------------------------------}
+{ Show Lisa Clock.                                                       }
+{------------------------------------------------------------------------}
+
+procedure NetSrcNm (var big : Str255);
+{ The source in use and the speed, in words. }
+var part : Str255;
+begin
+   if ntSrc = ntSTown then begin
+      if ntHave then
+         big := concat('the web (timeapi.io) for ', ntTown)
+      else
+         big := 'the web for your town (no town yet: T in LisaFuji)'
+   end
+   else if ntSrc = ntSZone then begin
+      if length(ntZone) > 0 then
+         big := concat('the web (timeapi.io) for ', ntZone)
+      else
+         big := 'the web for a time zone (none typed yet)'
+   end
+   else if fnVia = fnViaMb then         { REV H: the ESPFuji drive's clock (SNTP; timezone= in espfuji.ini) }
+      big := 'the ESProFile''s clock (ESPFuji; its time zone is set in espfuji.ini)'
+   else
+      big := 'the FujiNet''s clock (its time zone is set on the FujiNet)';
+   if fnVia <> fnViaMb then begin        { REV H: no baud rate on the drive }
+      TwNum(ntBaud, part);
+      big := concat(big, concat(', ', concat(part, ' baud')))
+   end
+end;
+
+procedure ShowClock;
+var y, doy, h, mi, s : integer;
+    ry, rm, rd, rt   : integer;
+    m, d             : integer;
+    haveNote         : boolean;
+    row              : StatStr;
+    lead             : StatStr;
+    part             : Str255;
+begin
+   promptOn := false;
+   promptStep := esNone;
+   ckMode := 0;
+   LogMode;
+   quiet := true;
+   row := solVersion;
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   haveNote := TwLoad(myVol, ry, rm, rd, rt);
+   if TwGet(y, doy, h, mi, s) then begin
+      lead := 'Lisa clock:  ';
+      SayDate(lead, y, doy, h, mi);
+      if haveNote and (rt = y) and (ry <> y) then begin
+         TwMonDay(y, doy, m, d);
+         lead := 'Real date:   ';
+         SayDate(lead, ry, TwDayOY(ry, m, d), h, mi)
+      end
+      else begin
+         row := '(No note of the real year for this clock setting.)';
+         AddLine(row)
+      end
+   end
+   else begin
+      row := 'The Lisa clock is NOT SET: it lost power and reads 1980.';
+      AddLine(row);
+      row := 'Press S to set it.';
+      AddLine(row)
+   end;
+   row := '';
+   AddLine(row);
+   NetSrcNm(part);
+   part := concat('Network: ', part);
+   AddBig(part);
+   row := '';
+   AddLine(row);
+   row := 'S = set by hand    N = set from the network    C = show    H = help';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+{------------------------------------------------------------------------}
+{ Help pages.  Each fills the pane once.                                 }
+{------------------------------------------------------------------------}
+
+procedure HelpUse;
+var row : StatStr;
+begin
+   LogMode;
+   quiet := true;
+   row := 'LisaSolstice: the seasons on the Lisa.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'D  days to the next solstice or equinox, and the next five coming up';
+   AddLine(row);
+   row := 'O  the Earth''s orbit seen from above, with today''s place';
+   AddLine(row);
+   row := 'E  the Earth''s tilt: which pole leans toward the Sun today';
+   AddLine(row);
+   row := 'W  where the Sun is straight overhead right now';
+   AddLine(row);
+   row := 'M  day and night now, on a map of the world';
+   AddLine(row);
+   row := 'L  solstice traditions: how many winter solstices old each one is';
+   AddLine(row);
+   row := 'Y  sunrise, sunset and daylight in your town';
+   AddLine(row);
+   row := 'F  a fun fact about the solstice';
+   AddLine(row);
+   row := 'G  the solargraph: six months of the Sun''s path, on film in a pop can';
+   AddLine(row);
+   row := 'P  pictures from history: Newgrange, Stonehenge, Serpent Mound, the Yule log';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'Set your town and time zone once in the Seasons menu (kept beside the tool).';
+   AddLine(row);
+   row := 'The clock: S sets it by hand, N from a FujiNet; T explains twin years.';
+   AddLine(row);
+   row := 'Times are good to about two minutes.  C shows the Lisa''s clock.';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+procedure HelpTwin;
+var row : StatStr;
+begin
+   LogMode;
+   quiet := true;
+   row := 'About twin years';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'The Lisa''s clock only counts the years 1981 to 1995.  It cannot';
+   AddLine(row);
+   row := 'hold 2026.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'A twin year is a year in that range with the same calendar:';
+   AddLine(row);
+   row := 'every date falls on the same weekday.  The twin of 2026 is 1987.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'So the Lisa shows the right month, day, weekday and time, and';
+   AddLine(row);
+   row := 'the year reads 1987.  Files made today carry 1987 dates.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := '2028, 2032 and 2036 have no twin.  The tool then uses 1988:';
+   AddLine(row);
+   row := 'dates are right and only the weekday names are wrong.';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+{------------------------------------------------------------------------}
+{ Set Clock: five typed values on the last pane line, then Confirm.      }
+{------------------------------------------------------------------------}
+
+procedure LoadDefs;
+{ The values offered in brackets.  The note file gives the real year    }
+{ and the last date; a clock that is still running gives a better       }
+{ month, day, hour and minute.  -1 = nothing to offer.                  }
+var ry, rm, rd, rt   : integer;
+    y, doy, h, mi, s : integer;
+    m, d             : integer;
+begin
+   dfYear  := baseYear;
+   dfMonth := -1;
+   dfDay   := -1;
+   dfHour  := -1;
+   dfMin   := -1;
+   if TwLoad(myVol, ry, rm, rd, rt) then begin
+      dfYear  := ry;
+      dfMonth := rm;
+      dfDay   := rd
+   end;
+   if TwGet(y, doy, h, mi, s) then begin
+      TwMonDay(y, doy, m, d);
+      dfMonth := m;
+      dfDay   := d;
+      dfHour  := h;
+      dfMin   := mi
+   end
+end;
+
+procedure DrawPrompt;
+var big : Str255;
+    row : StatStr;
+begin
+   big := concat(promptLbl, concat(promptTxt, '_'));
+   Clip(big, row);
+   SetLast(row)
+end;
+
+procedure AskStep;
+{ Put up the prompt for promptStep on a new last line. }
+var what : StatStr;
+    dflt : integer;
+    part : Str255;
+    big  : Str255;
+    row  : StatStr;
+begin
+   what := 'Minute (0-59)';
+   dflt := dfMin;
+   if promptStep = esYear then begin
+      what := 'Year';
+      dflt := dfYear
+   end
+   else if promptStep = esMonth then begin
+      what := 'Month (1-12)';
+      dflt := dfMonth
+   end
+   else if promptStep = esDay then begin
+      what := 'Day';
+      dflt := dfDay
+   end
+   else if promptStep = esHour then begin
+      what := 'Hour (0-23)';
+      dflt := dfHour
+   end;
+   if dflt >= 0 then begin
+      TwNum(dflt, part);
+      big := concat(what, concat(' [', part));
+      big := concat(big, ']: ')
+   end
+   else
+      big := concat(what, ': ');
+   Clip(big, promptLbl);
+   promptTxt := '';
+   promptOn := true;
+   row := '';
+   AddLine(row);
+   DrawPrompt
+end;
+
+procedure CancelSet;
+var row : StatStr;
+begin
+   promptOn := false;
+   promptStep := esNone;
+   row := 'Cancelled.  Nothing was changed.';
+   SetLast(row)
+end;
+
+procedure Confirm;
+{ All five values are in.  Show both dates, ask, set, read back, save   }
+{ the note.                                                              }
+var twinY : integer;
+    doy   : integer;
+    rc    : integer;
+    exact : boolean;
+    go    : boolean;
+    row   : StatStr;
+    lead  : StatStr;
+    part  : Str255;
+    big   : Str255;
+begin
+   twinY := TwYear(inYear, exact);
+   if (inMonth = 2) and (inDay = 29) and (not TwLeap(twinY)) then
+      doy := TwDayOY(twinY, 3, 1)       { defensive: cannot happen }
+   else
+      doy := TwDayOY(twinY, inMonth, inDay);
+
+   row := '';
+   AddLine(row);
+   lead := 'Today:               ';
+   SayDate(lead, inYear, TwDayOY(inYear, inMonth, inDay), inHour, inMin);
+   lead := 'Lisa will be set to: ';
+   SayDate(lead, twinY, doy, inHour, inMin);
+
+   if exact then
+      go := CautionAlert(allAlerts, alrtSetGo)
+   else begin
+      TwNum(inYear, part);
+      big := concat(part, ' has no twin year: dates right, weekday names wrong.');
+      AddBig(big);
+      go := CautionAlert(allAlerts, alrtNoTwin)
+   end;
+   if not go then begin
+      row := 'Cancelled.  The clock was not changed.';
+      AddLine(row);
+      exit(Confirm)
+   end;
+
+   rc := TwSet(twinY, doy, inHour, inMin);
+   if rc = 0 then begin
+      row := 'The clock is set.  Press C to see it.';
+      AddLine(row);
+      if not TwSave(myVol, inYear, inMonth, inDay, twinY) then begin
+         TwNum(twEcode, part);
+         big := concat('(The note file was not saved: ecode ', part);
+         big := concat(big, '.)');
+         AddBig(big)
+      end
+   end
+   else begin
+      TwNum(rc, part);
+      big := concat('The clock was NOT set (result ', part);
+      big := concat(big, ').');
+      AddBig(big);
+      if rc = 2 then
+         row := 'The read-back did not match; the old time was put back.'
+      else if rc = 3 then
+         row := 'The read-back did not match; there was no old time to restore.'
+      else
+         row := 'A value was out of range; nothing was written.';
+      AddLine(row);
+      NoteAlert(allAlerts, alrtFail)
+   end
+end;
+
+procedure StepDone;
+{ RETURN at a prompt.  Empty = take the default.  A value out of range  }
+{ says so and asks again.  After the minute, Confirm.                    }
+var n, i   : integer;
+    lo, hi : integer;
+    dflt   : integer;
+    row    : StatStr;
+    part   : Str255;
+    big    : Str255;
+begin
+   promptOn := false;
+
+   dflt := dfMin;
+   lo := 0;
+   hi := 59;
+   if promptStep = esYear then begin
+      dflt := dfYear;
+      lo := twLoReal;
+      hi := twHiReal
+   end
+   else if promptStep = esMonth then begin
+      dflt := dfMonth;
+      lo := 1;
+      hi := 12
+   end
+   else if promptStep = esDay then begin
+      dflt := dfDay;
+      lo := 1;
+      hi := TwDaysIn(inYear, inMonth)
+   end
+   else if promptStep = esHour then begin
+      dflt := dfHour;
+      lo := 0;
+      hi := 23
+   end;
+
+   if length(promptTxt) = 0 then
+      n := dflt
+   else begin
+      n := 0;
+      for i := 1 to length(promptTxt) do
+         n := n * 10 + (ord(promptTxt[i]) - ord('0'))
+   end;
+
+   if (n < lo) or (n > hi) then begin
+      TwNum(lo, part);
+      big := concat('   That needs a number from ', part);
+      TwNum(hi, part);
+      big := concat(big, concat(' to ', part));
+      big := concat(big, '.');
+      Clip(big, row);
+      SetLast(row);
+      AskStep;
+      exit(StepDone)
+   end;
+
+   { accepted: the prompt line becomes the settled value }
+   TwNum(n, part);
+   big := concat(promptLbl, part);
+   Clip(big, row);
+   SetLast(row);
+
+   if promptStep = esYear then
+      inYear := n
+   else if promptStep = esMonth then
+      inMonth := n
+   else if promptStep = esDay then
+      inDay := n
+   else if promptStep = esHour then
+      inHour := n
+   else
+      inMin := n;
+
+   if promptStep < esMin then begin
+      promptStep := promptStep + 1;
+      AskStep
+   end
+   else begin
+      promptStep := esNone;
+      Confirm
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ Set from the Network (REV D).  N asks the source in use for the time, }
+{ shows it and the twin-year date, and waits for Y.  The sources and    }
+{ the speed are on the Network menu and kept in SOLNET.DATA (SolNet).   }
+{------------------------------------------------------------------------}
+
+procedure AskZone;
+{ The prompt for a time zone name; RETURN runs ZoneDone. }
+var row : StatStr;
+    big : Str255;
+begin
+   ckMode := 0;
+   LogMode;
+   quiet := true;
+   row := 'The web, for a time zone (timeapi.io)';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'Type the zone''s name, then RETURN.  Capitals count.  For example:';
+   AddLine(row);
+   row := '   America/New_York    America/Chicago    America/Denver';
+   AddLine(row);
+   row := '   America/Los_Angeles    Europe/London    Australia/Sydney';
+   AddLine(row);
+   if length(ntZone) > 0 then begin
+      big := concat('RETURN alone keeps ', ntZone);
+      AddBig(big)
+   end;
+   row := 'Clear cancels.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   promptLbl := 'Time zone: ';
+   promptTxt := '';
+   promptStep := esZone;
+   promptOn := true;
+   AddLine(row);
+   quiet := false;
+   DrawPrompt
+end;
+
+procedure NetAsk;
+{ N: the time from the network, both dates, and the Y question. }
+var rc                 : integer;
+    y, mo, d, h, mi, s : integer;
+    exact              : boolean;
+    row                : StatStr;
+    lead               : StatStr;
+    part               : Str255;
+    big                : Str255;
+begin
+   promptOn := false;
+   promptStep := esNone;
+   ckMode := 0;
+   LogMode;
+   row := 'Set the clock from the network';
+   AddLine(row);
+   NetSrcNm(part);
+   big := concat('From ', part);
+   AddBig(big);
+   row := '';
+   AddLine(row);
+   row := 'Asking the FujiNet ...';
+   AddLine(row);
+   rc := NtGet(y, mo, d, h, mi, s);
+   if rc = 4 then begin
+      AskZone;
+      exit(NetAsk)
+   end;
+   if rc = 1 then begin
+      row := 'Serial B would not open.  Quit LISACom or LisaFuji if one is open,';
+      SetLast(row);
+      row := 'or set the Serial B Connector to Serial Cable (Preferences).';
+      AddLine(row);
+      exit(NetAsk)
+   end;
+   if rc = 3 then begin
+      row := 'No town yet.  Set one in LisaFuji (T), on this disk, or choose';
+      SetLast(row);
+      row := 'another source on the Network menu.';
+      AddLine(row);
+      exit(NetAsk)
+   end;
+   if rc <> 0 then begin
+      big := concat('No time: ', ntWhy);
+      Clip(big, row);
+      SetLast(row);
+      if (ntRc = fnNoRep) or (ntRc = fnBadFr) or (ntRc = fnStall) then begin
+         row := '   Check: FujiNet on?  Cable on Serial B?  The same speed at both ends?';
+         AddLine(row)
+      end;
+      exit(NetAsk)
+   end;
+   if (y < 2024) or (y > twHiReal) or (mo < 1) or (mo > 12) or (d < 1)
+      or (d > TwDaysIn(y, mo)) or (h < 0) or (h > 23) or (mi < 0) or (mi > 59)
+   then begin
+      row := 'The time that came back is not usable: has the FujiNet got WiFi?';
+      SetLast(row);
+      exit(NetAsk)
+   end;
+   ckY := y;
+   ckMo := mo;
+   ckD := d;
+   ckH := h;
+   ckMi := mi;
+   ckTwin := TwYear(y, exact);
+   if (mo = 2) and (d = 29) and (not TwLeap(ckTwin)) then
+      ckDoy := TwDayOY(ckTwin, 3, 1)       { defensive: cannot happen }
+   else
+      ckDoy := TwDayOY(ckTwin, mo, d);
+   lead := 'Network time:        ';
+   SayDate(lead, y, TwDayOY(y, mo, d), h, mi);
+   statLine[statCnt - 1] := statLine[statCnt];    { over the Asking line }
+   statCnt := statCnt - 1;
+   lead := 'Lisa will be set to: ';
+   SayDate(lead, ckTwin, ckDoy, h, mi);
+   if not exact then begin
+      TwNum(y, part);
+      big := concat(part, ' has no twin year: dates right, weekday names wrong.');
+      AddBig(big)
+   end;
+   if ntFell then begin                  { REV D: the web failed, the FujiNet's clock was used }
+      big := concat('The web gave no time (', concat(ntWebWhy, '),'));
+      AddBig(big);
+      if fnVia = fnViaMb then
+         row := 'so this time is from the ESProFile''s own clock (ESPFuji).'
+      else
+         row := 'so this time is from the FujiNet''s own clock.';
+      AddLine(row)
+   end;
+   row := '';
+   AddLine(row);
+   row := 'Y sets the clock.  Any other key: no.';
+   AddLine(row);
+   ckMode := 1
+end;
+
+procedure NetSet;
+{ Y after NetAsk: set the clock, read it back, note the real year. }
+var rc   : integer;
+    row  : StatStr;
+    part : Str255;
+    big  : Str255;
+begin
+   ckMode := 0;
+   rc := TwSet(ckTwin, ckDoy, ckH, ckMi);
+   if rc = 0 then begin
+      row := 'The clock is set.  Press C to see it.';
+      SetLast(row);
+      if not TwSave(myVol, ckY, ckMo, ckD, ckTwin) then begin
+         TwNum(twEcode, part);
+         big := concat('(The note file was not saved: ecode ', concat(part, '.)'));
+         AddBig(big)
+      end
+   end
+   else begin
+      TwNum(rc, part);
+      big := concat('The clock was NOT set (result ', concat(part, ').'));
+      Clip(big, row);
+      SetLast(row);
+      if rc = 2 then
+         row := 'The read-back did not match; the old time was put back.'
+      else if rc = 3 then
+         row := 'The read-back did not match; there was no old time to restore.'
+      else
+         row := 'A value was out of range; nothing was written.';
+      AddLine(row)
+   end
+end;
+
+procedure NetAnswer (ch : char);
+{ The key after NetAsk. }
+var row : StatStr;
+begin
+   if (ch = 'Y') or (ch = 'y') then
+      NetSet
+   else begin
+      ckMode := 0;
+      row := 'The clock was not changed.';
+      SetLast(row)
+   end
+end;
+
+procedure ZoneDone;
+{ RETURN at the time zone prompt: keep it, use it, ask. }
+var row : StatStr;
+begin
+   promptOn := false;
+   promptStep := esNone;
+   if length(promptTxt) > 0 then
+      ntZone := promptTxt;
+   if length(ntZone) = 0 then begin
+      row := 'No time zone was typed.  Nothing changed.';
+      SetLast(row);
+      exit(ZoneDone)
+   end;
+   ntSrc := ntSZone;
+   if NtSave(myVol) then ;
+   NetAsk
+end;
+
+procedure SetSrc (n : integer);
+{ A source chosen on the Network menu: keep it and try it. }
+begin
+   ckMode := 0;
+   if n = ntSZone then begin
+      AskZone;
+      exit(SetSrc)
+   end;
+   if n = ntSTown then
+      if NtTownLd(myVol) then ;
+   ntSrc := n;
+   if NtSave(myVol) then ;
+   NetAsk
+end;
+
+procedure SetBaud (b : longint);
+{ A speed chosen on the Network menu.  Phase 2 (22-Oct): the FujiNet is }
+{ set too, through its own web page, restarted and followed (NtSetSp);  }
+{ the choice is kept in SOLNET.DATA.                                     }
+var row : StatStr;
+    msg : Str255;
+begin
+   promptOn := false;
+   promptStep := esNone;
+   ckMode := 0;
+   LogMode;
+   row := 'Changing the speed';
+   AddLine(row);
+   row := 'Telling the FujiNet through its web page, restarting it, then opening';
+   AddLine(row);
+   row := 'the port at the new speed.  About 20 seconds ...';
+   AddLine(row);
+   NtSetSp(b, msg);
+   AddBig(msg);
+   row := 'N sets the clock from the network.';
+   AddLine(row)
+end;
+
+procedure StartSet;
+var row : StatStr;
+begin
+   LoadDefs;
+   LogMode;
+   row := 'Set the clock.  Type each value, then RETURN.';
+   AddLine(row);
+   row := 'RETURN alone takes the [value] shown.  X cancels.';
+   AddLine(row);
+   promptStep := esYear;
+   AskStep
+end;
+
+{------------------------------------------------------------------------}
+{ LisaSolstice REV A: the season pages, the pictures, the settings.      }
+{------------------------------------------------------------------------}
+
+{$S SOLSeas}
+
+function NowUT (var dn : longint; var fr : real; var guess : boolean) : boolean;
+{ Now, in UT: whole days since 1 January 2000 and the fraction of the   }
+{ day.  The Lisa's clock gives the month, day and time (your time); the  }
+{ real year comes from the twin-year note, or is guessed (the first year }
+{ from baseYear on whose twin is the clock's year).  FALSE: clock unset. }
+var y, doy, h, mi, sec : integer;
+    ry, rm, rd, rt     : integer;
+    m, d               : integer;
+    realY, cand        : integer;
+    exact, found       : boolean;
+    haveN              : boolean;
+    mins               : longint;
+begin
+   NowUT := false;
+   guess := false;
+   if not TwGet(y, doy, h, mi, sec) then
+      exit(NowUT);
+   TwMonDay(y, doy, m, d);
+   haveN := TwLoad(myVol, ry, rm, rd, rt);
+   if haveN and (rt = y) then
+      realY := ry
+   else if haveN and (y > rt) and (y - rt <= 2) then begin
+      { the clock ran past New Year since it was set: 1987 -> 1988 is }
+      { 2026 -> 2027, not the next year whose twin is 1988           }
+      realY := ry + (y - rt);
+      guess := true
+   end
+   else begin
+      realY := y;
+      guess := true;
+      found := false;
+      cand := baseYear;
+      while (not found) and (cand <= baseYear + 40) do begin
+         if TwYear(cand, exact) = y then begin
+            realY := cand;
+            found := true
+         end
+         else
+            cand := cand + 1
+      end
+   end;
+   dn := SaDays(realY, m, d);
+   mins := h;
+   mins := mins * 60 + mi - vwZoneQ * 15;
+   while mins < 0 do begin
+      mins := mins + 1440;
+      dn := dn - 1
+   end;
+   while mins >= 1440 do begin
+      mins := mins - 1440;
+      dn := dn + 1
+   end;
+   fr := (mins + sec / 60.0) / 1440.0;
+   pgDay := dn;
+   pgFr := fr;
+   NowUT := true
+end;
+
+procedure SeasKeys;
+{ (no blank line above it: the countdown has five events coming up now) }
+var row : StatStr;
+begin
+   row := 'D days  O orbit  E tilt  W Sun  M map  Y town  F fact  G photo  L past  P pics';
+   AddLine(row)
+end;
+
+procedure NotSet;
+var row : StatStr;
+begin
+   LogMode;
+   quiet := true;
+   row := 'The Lisa''s clock is not set, so LisaSolstice does not know the date.';
+   AddLine(row);
+   row := '';
+   AddLine(row);
+   row := 'Press S to set it by hand (no FujiNet needed), or N to set it from';
+   AddLine(row);
+   row := 'a FujiNet, LisaNet or ESPFuji ESProFile.';
+   AddLine(row);
+   quiet := false;
+   DrawShow
+end;
+
+procedure ShowRows;
+{ The page SolView built, then the keys. }
+var i   : integer;
+    row : StatStr;
+begin
+   LogMode;
+   quiet := true;
+   for i := 1 to vwCnt do begin
+      row := vwRow[i];
+      AddLine(row)
+   end;
+   SeasKeys;
+   quiet := false;
+   DrawShow
+end;
+
+procedure DoDays;
+var dn    : longint;
+    fr    : real;
+    guess : boolean;
+begin
+   if not NowUT(dn, fr, guess) then begin
+      NotSet;
+      exit(DoDays)
+   end;
+   VwSeason(dn, fr, guess);
+   ShowRows
+end;
+
+procedure DoSunNow;
+var dn    : longint;
+    fr    : real;
+    guess : boolean;
+begin
+   if not NowUT(dn, fr, guess) then begin
+      NotSet;
+      exit(DoSunNow)
+   end;
+   VwSunNow(dn, fr);
+   ShowRows
+end;
+
+procedure DoTown;
+var dn    : longint;
+    fr    : real;
+    guess : boolean;
+begin
+   if not NowUT(dn, fr, guess) then begin
+      NotSet;
+      exit(DoTown)
+   end;
+   VwTownPg(dn, fr);
+   ShowRows
+end;
+
+procedure DoPic (which : integer);
+{ The orbit (pgOrbit) or the tilt (pgTilt) under a line or two of words. }
+var dn    : longint;
+    fr    : real;
+    guess : boolean;
+    row   : StatStr;
+    big   : Str255;
+    part  : Str255;
+begin
+   if not NowUT(dn, fr, guess) then begin
+      NotSet;
+      exit(DoPic)
+   end;
+   LogMode;
+   quiet := true;
+   if which = pgOrbit then
+      row := 'The Earth''s orbit today.   D days  E tilt  W Sun now  Y your town'
+   else
+      row := 'The Earth''s tilt today, seen from the side.   D days  O orbit  W Sun now';
+   AddLine(row);
+   if which = pgTilt then begin
+      { where the Sun is overhead (as Solstice for Mac says it) }
+      SaSun(dn, fr);
+      VwFix1(abs(saDecl), part);
+      if saDecl >= 0 then part := concat(part, ' N') else part := concat(part, ' S');
+      big := concat('The Sun is overhead at ', concat(part, '; the axis always points the same way in space.'));
+      Clip(big, row);
+      AddLine(row)
+   end;
+   pageMode := which;
+   quiet := false;
+   DrawShow
+end;
+
+procedure DoMapPg;
+{ Day and night now on the world map (from Solstice for Mac). }
+var dn    : longint;
+    fr    : real;
+    guess : boolean;
+    row   : StatStr;
+begin
+   if not NowUT(dn, fr, guess) then begin
+      NotSet;
+      exit(DoMapPg)
+   end;
+   LogMode;
+   quiet := true;
+   row := 'Day and night now.   D days  O orbit  E tilt  W Sun now  Y your town';
+   AddLine(row);
+   VwMapTx(dn, fr);
+   mpL1 := vwRow[1];
+   mpL2 := vwRow[2];
+   pageMode := pgMap;
+   quiet := false;
+   DrawShow
+end;
+
+procedure DoTimePg;
+{ The Solstice Traditions timeline, counted to this year. }
+var dn    : longint;
+    fr    : real;
+    guess : boolean;
+    row   : StatStr;
+    y, mo, d : integer;
+begin
+   tlYear := 2026;
+   if NowUT(dn, fr, guess) then begin
+      SaCiv(dn, y, mo, d);
+      tlYear := y
+   end;
+   LogMode;
+   quiet := true;
+   row := 'Solstice traditions: how many winter solstices old.   D days  F fact  G photo';
+   AddLine(row);
+   pageMode := pgTime;
+   quiet := false;
+   DrawShow
+end;
+
+procedure DoSplash;
+{ The opening page: Tim's solargraph under one line of words. }
+var row : StatStr;
+begin
+   LogMode;
+   quiet := true;
+   row := 'The Sun over Cincinnati, June to December solstice, in a pop-can pinhole camera';
+   AddLine(row);
+   pageMode := pgSplash;
+   quiet := false;
+   DrawShow
+end;
+
+procedure DoPhoto;
+{ REV B: page P, a picture from Tim and Connie's Winter Solstice talk;  }
+{ P again shows the next one.                                         }
+var row : StatStr;
+begin
+   if pageMode = pgPhoto then begin
+      phNo := phNo + 1;
+      if phNo > phN then phNo := 1
+   end;
+   if (phNo < 1) or (phNo > phN) then phNo := 1;
+   LogMode;
+   quiet := true;
+   case phNo of   { REV C: the order of SolPho (make_solpho.py) }
+      1 : begin
+             row := 'Newgrange, Ireland, about 3200 BC: the passage and chamber, plan and side.';
+             AddLine(row);
+             row := 'At midwinter sunrise a beam runs up the passage.  Wakeman, 1903.   P next';
+             AddLine(row)
+          end;
+      2 : begin
+             row := 'Midwinter sunlight in the Newgrange chamber, December 2013.';
+             AddLine(row);
+             row := 'Photo: Dentp, CC BY-SA 4.0 (Wikimedia Commons).   P next  F fact';
+             AddLine(row)
+          end;
+      3 : begin
+             row := 'Stonehenge, about 2500 BC: its great stones frame the midwinter sunset.';
+             AddLine(row);
+             row := 'Photo: Jeffrey Pfau, CC BY-SA 3.0 (Wikimedia Commons).   P next';
+             AddLine(row)
+          end;
+      4 : begin
+             row := 'Ohio''s Great Serpent Mound on an old postcard, 70 miles east of Cincinnati.';
+             AddLine(row);
+             row := 'Its head points to the summer solstice sunset.   P next  F fact';
+             AddLine(row)
+          end;
+      5 : begin
+             row := 'Bringing in the Yule log: a wood engraving of the 1800s.';
+             AddLine(row);
+             row := 'It burned the old year away; a piece lit next year''s log.   P next  F fact';
+             AddLine(row)
+          end;
+      otherwise begin
+             row := 'The heavens in an engraving of the 1600s: the Earth in the middle,';
+             AddLine(row);
+             row := 'then the air, the Moon, the Sun and the stars.   P next  D days';
+             AddLine(row)
+          end
+   end;
+   pageMode := pgPhoto;
+   quiet := false;
+   DrawShow
+end;
+
+procedure DoFact;
+begin
+   NoteAlert(allAlerts, alrtFact0 + factNo);
+   factNo := factNo + 1;
+   if factNo >= nFacts then factNo := 0
+end;
+
+procedure GeoAsk;
+{ The prompt for esUtc, esLat or esLon, with the value now in brackets. }
+var part : Str255;
+    big  : Str255;
+    row  : StatStr;
+begin
+   if promptStep = esUtc then begin
+      VwZoneTx(part);
+      big := concat('Hours from UTC [', concat(part, ']: '))
+   end
+   else if promptStep = esLat then begin
+      VwFix1(vwLat, part);
+      big := concat('Latitude [', concat(part, ']: '))
+   end
+   else begin
+      VwFix1(vwLon, part);
+      big := concat('Longitude [', concat(part, ']: '))
+   end;
+   Clip(big, promptLbl);
+   promptTxt := '';
+   promptOn := true;
+   row := '';
+   AddLine(row);
+   DrawPrompt
+end;
+
+procedure AskTown;
+var row : StatStr;
+begin
+   LogMode;
+   quiet := true;
+   row := 'Set your town: its latitude and longitude in degrees.';
+   AddLine(row);
+   row := 'South and west are minus.  Cincinnati is 39.1 and -84.5;';
+   AddLine(row);
+   row := 'London 51.5 and -0.1; Sydney -33.9 and 151.2.';
+   AddLine(row);
+   row := 'RETURN alone keeps the [value] shown.  X cancels.';
+   AddLine(row);
+   quiet := false;
+   DrawShow;
+   promptStep := esLat;
+   GeoAsk
+end;
+
+procedure AskUtc;
+var row : StatStr;
+begin
+   LogMode;
+   quiet := true;
+   row := 'Set your time zone: hours from UTC, west of London is minus.';
+   AddLine(row);
+   row := 'Cincinnati: -5 in winter, -4 in summer.  London 0; India 5.5.';
+   AddLine(row);
+   row := 'Change it when the clocks change.  RETURN keeps the value shown.';
+   AddLine(row);
+   quiet := false;
+   DrawShow;
+   promptStep := esUtc;
+   GeoAsk
+end;
+
+function ParseNum (var t : StatStr; var x : real) : boolean;
+{ "-84.51" -> -84.51.  Digits, at most one point, a minus sign first. }
+var i, n    : integer;
+    neg     : boolean;
+    point   : boolean;
+    scale   : real;
+    got     : boolean;
+    c       : char;
+begin
+   ParseNum := false;
+   x := 0;
+   neg := false;
+   point := false;
+   got := false;
+   scale := 1.0;
+   n := length(t);
+   for i := 1 to n do begin
+      c := t[i];
+      if (c = '-') and (i = 1) then
+         neg := true
+      else if (c = '.') and (not point) then
+         point := true
+      else if (c >= '0') and (c <= '9') then begin
+         got := true;
+         if point then begin
+            scale := scale / 10.0;
+            x := x + (ord(c) - ord('0')) * scale
+         end
+         else
+            x := x * 10.0 + (ord(c) - ord('0'))
+      end
+      else
+         exit(ParseNum)
+   end;
+   if neg then x := -x;
+   ParseNum := got
+end;
+
+procedure GeoDone;
+{ RETURN at a LisaSolstice prompt: check, keep, save, show. }
+var x   : real;
+    ok  : boolean;
+    row : StatStr;
+begin
+   ok := true;
+   if length(promptTxt) = 0 then begin
+      if promptStep = esUtc then x := vwZoneQ / 4.0
+      else if promptStep = esLat then x := vwLat
+      else x := vwLon
+   end
+   else
+      ok := ParseNum(promptTxt, x);
+   if ok then begin
+      if promptStep = esUtc then ok := (x >= -12.0) and (x <= 14.0)
+      else if promptStep = esLat then ok := (x >= -90.0) and (x <= 90.0)
+      else ok := (x >= -180.0) and (x <= 180.0)
+   end;
+   if not ok then begin
+      row := 'That is not a number in range.  Type it again, or X to cancel.';
+      AddLine(row);
+      GeoAsk;
+      exit(GeoDone)
+   end;
+   promptOn := false;
+   if promptStep = esLat then begin
+      inLatT := x;
+      promptStep := esLon;
+      GeoAsk;
+      exit(GeoDone)
+   end;
+   if promptStep = esLon then begin
+      vwLat := inLatT;
+      vwLon := x
+   end
+   else
+      vwZoneQ := round(x * 4.0);
+   promptStep := esNone;
+   if not VwSave(myVol) then begin
+      row := 'Kept for now, but SOLSTICE.DATA could not be written.';
+      AddLine(row)
+   end;
+   DoTown
+end;
+
+procedure PromptKey (ch : char);
+{ RETURN (or ENTER) finishes the value, Backspace erases, X or Clear    }
+{ cancels, digits append up to numCap.  Everything else is ignored.     }
+var tmp : string[1];
+begin
+   if (ch = chr(13)) or (ch = chr(3)) then begin
+      if promptStep = esZone then
+         ZoneDone
+      else if promptStep >= esUtc then
+         GeoDone
+      else
+         StepDone
+   end
+   else if (ch = chr(27)) or (((ch = 'X') or (ch = 'x')) and (promptStep <> esZone)) then
+      CancelSet
+   else if ch = chr(8) then begin
+      if length(promptTxt) > 0 then begin
+         promptTxt[0] := chr(length(promptTxt) - 1);
+         DrawPrompt
+      end
+   end
+   else if promptStep >= esUtc then begin
+      if (((ch >= '0') and (ch <= '9')) or (ch = '-') or (ch = '.'))
+         and (length(promptTxt) < 8) then begin
+         tmp := ' ';
+         tmp[1] := ch;
+         promptTxt := concat(promptTxt, tmp);
+         DrawPrompt
+      end
+   end
+   else if promptStep = esZone then begin
+      if (ch > ' ') and (ch <= '~') and (length(promptTxt) < ntZCap) then begin
+         tmp := ' ';
+         tmp[1] := ch;
+         promptTxt := concat(promptTxt, tmp);
+         DrawPrompt
+      end
+   end
+   else if (ch >= '0') and (ch <= '9') and (length(promptTxt) < numCap)
+   then begin
+      tmp := ' ';
+      tmp[1] := ch;
+      promptTxt := concat(promptTxt, tmp);
+      DrawPrompt
+   end
+end;
+
+procedure PlainKey (ch : char);
+{ Keys without the Apple key, when no prompt is up.  On the splash page a }
+{ key that is not a command goes on to the countdown.                     }
+var wasSp : boolean;
+begin
+   wasSp := pageMode = pgSplash;
+   if wasSp then pageMode := pgText;
+   if ckMode = 1 then
+      NetAnswer(ch)
+   else if (ch = 'S') or (ch = 's') then
+      StartSet
+   else if (ch = 'N') or (ch = 'n') then
+      NetAsk
+   else if (ch = 'C') or (ch = 'c') then
+      ShowClock
+   else if (ch = 'H') or (ch = 'h') or (ch = '?') then
+      HelpUse
+   else if (ch = 'T') or (ch = 't') then
+      HelpTwin
+   else if (ch = 'D') or (ch = 'd') then
+      DoDays
+   else if (ch = 'O') or (ch = 'o') then
+      DoPic(pgOrbit)
+   else if (ch = 'E') or (ch = 'e') then
+      DoPic(pgTilt)
+   else if (ch = 'W') or (ch = 'w') then
+      DoSunNow
+   else if (ch = 'Y') or (ch = 'y') then
+      DoTown
+   else if (ch = 'F') or (ch = 'f') then
+      DoFact
+   else if (ch = 'G') or (ch = 'g') then
+      DoSplash
+   else if (ch = 'M') or (ch = 'm') then
+      DoMapPg
+   else if (ch = 'L') or (ch = 'l') then
+      DoTimePg
+   else if (ch = 'P') or (ch = 'p') then
+      DoPhoto
+   else if wasSp then
+      DoDays
+end;
+
+{------------------------------------------------------------------------}
+{ Window.                                                                }
+{------------------------------------------------------------------------}
+
+procedure doUpdateEvent (normal : boolean; window : WindowPtr);
+begin
+   if normal then BeginUpdate(window);
+   DrawShow;
+   if normal then EndUpdate(window)
+end;
+
+procedure InitNewDoc (window : WindowPtr);
+begin
+   myWindow := window;
+   TakeWindow(myWindow);
+   FolderSize(myWindow, winW, winH, false);
+   SetPort(myWindow);
+   ClipRect(myWindow^.portRect);        { FolderSize left the clip at the old size (Checkers SyncPort) }
+   ValidRect(myWindow^.portRect);
+
+   DoSplash;                            { LisaSolstice opens on Tim's solargraph; any key goes on }
+   { (no doUpdateEvent here: DoSplash has drawn the window; a second draw  }
+   {  showed the picture twice on the 2/10, Tim 2 Nov)                     }
+
+   if activeFolder = myWindow then
+      PutUpMenus
+end;
+
+procedure DoFilerEvent;
+var wantsOpen : boolean;
+begin
+   HandleFilerOp(wantsOpen);
+   if wantsOpen then
+      InitNewDoc(theEvent.who)
+end;
+
+{------------------------------------------------------------------------}
+{ Commands and events.                                                   }
+{------------------------------------------------------------------------}
+
+procedure MenuCommand (menu, item : integer);
+var err : integer;
+begin
+   if promptOn then                     { a menu command abandons the prompt }
+      CancelSet;
+   ckMode := 0;                         { and the network question }
+   case menu of
+
+      mFile :
+         case item of
+            miAsideAll : DoFilingCmd(cmdClosAll);
+            miAside    : DoFilingCmd(cmdClose);
+            miPutAway  :
+               begin
+                  TellFiler(err, docClosd, docPutBack, myWindow);
+                  myWindow := nil
+               end;
+         end;
+
+      mClock :
+         case item of
+            miSet  : StartSet;
+            miShow : ShowClock;
+         end;
+
+      mNet :
+         case item of
+            miNetSet  : NetAsk;
+            miSrcFuji : SetSrc(ntSFuji);
+            miSrcTown : SetSrc(ntSTown);
+            miSrcZone : SetSrc(ntSZone);
+            miBd9600  : SetBaud(9600);
+            miBd19200 : SetBaud(19200);
+         end;
+
+      mSeason :
+         case item of
+            miDays   : DoDays;
+            miOrbit  : DoPic(pgOrbit);
+            miTilt   : DoPic(pgTilt);
+            miSunNow : DoSunNow;
+            miMapNow : DoMapPg;
+            miTown   : DoTown;
+            miSetTwn : AskTown;
+            miSetZon : AskUtc;
+            miFact   : DoFact;
+            miSolar  : DoSplash;
+            miTrad   : DoTimePg;
+            miPhotos : DoPhoto;
+         end;
+
+      mHelp :
+         case item of
+            miHelpUse  : HelpUse;
+            miHelpTwin : HelpTwin;
+         end;
+
+      mVer :
+         case item of
+            miAbout : NoteAlert(allAlerts, alrtAbou);
+         end;
+
+   end
+end;
+
+procedure ProcessTheEvent;
+var theMenu, theItem : integer;
+begin
+   case theEvent.what of
+
+      buttonDown :
+         if theEvent.who = menuFolder then begin
+            MenuSelect(theEvent.where, theMenu, theItem);
+            if (theMenu <> 0) and (theItem <> 0) then
+               MenuCommand(theMenu, theItem);
+            HiLiteMenu(0)
+         end
+         else if (theEvent.who = myWindow) and (pageMode = pgSplash) and (not promptOn) then
+            DoDays;                             { a click on the splash goes on }
+
+      buttonUp :
+         ;
+
+      keyDown :
+         if (theEvent.who = myWindow) and (not theEvent.repeatKey) then begin
+            if theEvent.appleKey then begin
+               MenuKey(theEvent.ascii, theMenu, theItem);
+               if theMenu <> 0 then begin
+                  HiLiteMenu(theMenu);
+                  MenuCommand(theMenu, theItem);
+                  HiLiteMenu(0)
+               end
+            end
+            else if promptOn then
+               PromptKey(theEvent.ascii)
+            else
+               PlainKey(theEvent.ascii)
+         end;
+
+      folderActivate :
+         begin
+            TakeControl(theEvent, false, false);
+            PutUpMenus
+         end;
+
+      folderDeactivate :
+         GiveControl(theEvent);
+
+      folderUpdate :
+         if theEvent.who = myWindow then
+            doUpdateEvent(true, theEvent.who)
+         else begin
+            BeginUpdate(theEvent.who);
+            EndUpdate(theEvent.who)
+         end;
+
+      folderMoved :
+         ;
+
+      filerEvent :
+         DoFilerEvent;
+
+      abortEvent, diedEvent, diskEvent, catalogEvent, nilEvent :
+         ;
+
+      otherwise
+
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ Initialize.                                                            }
+{------------------------------------------------------------------------}
+
+procedure Initialize;
+var err      : integer;
+    schedErr : integer;
+    tmp1     : string[1];
+    pcInfo   : procinfoRec;
+    excName  : t_ex_name;
+    myPrefix : TParamAlert;
+    cutAt    : integer;
+begin
+   initing := true;
+
+   excName := 'SYS_TERMINATE';
+   Declare_Excep_Hdl(err, excName, @LastWishes);
+   if err <> 0 then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      halt
+   end;
+
+   toldToDie := false;
+   myWindow  := nil;
+   statCnt   := 0;
+   quiet     := false;
+   promptOn  := false;
+   promptStep := esNone;
+   promptTxt := '';
+   promptLbl := '';
+   inYear    := baseYear;
+   inMonth   := 1;
+   inDay     := 1;
+   inHour    := 0;
+   inMin     := 0;
+   dfYear    := baseYear;
+   dfMonth   := -1;
+   dfDay     := -1;
+   dfHour    := -1;
+   dfMin     := -1;
+   twEcode   := 0;
+   ckMode    := 0;
+   pageMode  := pgText;
+   factNo    := 0;
+   phNo      := 1;
+   inUtcQ    := 0;
+   inLatT    := 0;
+   pgDay     := 0;
+   pgFr      := 0;
+   SaInit;
+   VwInit;
+
+   InitHeap(@myZone[0], @myZone[maxHeap], @OutOfHeapSpace);
+
+   Sched_Class(schedErr, false);
+   Info_Process(err, My_ID, pcInfo);
+   Sched_Class(schedErr, true);
+
+   cutAt := pos('}', pcInfo.progpathname);
+   if (cutAt = 0) or (cutAt > 40) then begin
+      TellFiler(err, initFailed, internalError, nil);
+      halt
+   end;
+   myPrefix := copy(pcInfo.progpathname, 1, cutAt);
+   { the device prefix alone: everything before the open-brace of the  }
+   { tool file set.  chr(123) is the open brace, built the SanName way. }
+   tmp1 := ' ';
+   tmp1[1] := chr(123);
+   cutAt := pos(tmp1, pcInfo.progpathname);
+   if (cutAt > 1) and (cutAt <= 33) then
+      myVol := copy(pcInfo.progpathname, 1, cutAt - 1)
+   else
+      myVol := '-#12-';                { defensive fallback: boot }
+   NtInit;                              { REV D: the network source (calls FnInit) }
+   if NtLoad(myVol) then ;
+   if NtTownLd(myVol) then ;
+   FnSetVol(myVol);                     { REV J 1-Nov-2026: AFTER NtInit, whose FnInit had wiped }
+   if FnMbUp then ;                     { the ESProFile probe (2/10: N fell back to Serial B) }
+   if VwLoad(myVol) then ;              { LisaSolstice: your town and time zone }
+
+   InitMP(theHeap, myPrefix, @AlertFailed, alertVerNum,
+          @myMenus[mFile], allAlerts, err);
+   if err > 0 then begin
+      TellFiler(err, initFailed, noMemory, nil);
+      halt
+   end;
+
+   InitWmlCrs(err);
+   if err <> 0 then begin
+      TellFiler(err, initFailed, noDiskSpace, nil);
+      halt
+   end;
+
+   SetPort(deskPort);
+
+   initing := false
+end;
+
+{------------------------------------------------------------------------}
+{ The main program -- two-phase loop, nothing to do when idle.           }
+{------------------------------------------------------------------------}
+
+begin { main program }
+
+   InitGraf(@thePort);
+   OpenWm;
+   Initialize;
+
+   repeat
+
+      while not (ImActive or toldToDie) do begin
+         GetEvent(theEvent);
+         ProcessTheEvent
+      end;
+
+      while ImActive and (not toldToDie) do begin
+         if EventAvail then begin
+            GetEvent(theEvent);
+            ProcessTheEvent
+         end
+         else
+            LetOthersRun
+      end;
+
+   until toldToDie;
+
+   termErr := 0
+end.

@@ -1,0 +1,30 @@
+$EXEC
+${ REV A  10-Oct-2026  First build.  Icon file SOLICONA.BIN -> SOL/ICON.BIN. }
+${==========================================================================}
+${ SOL-MAKE.TEXT -- build LisaSolstice: compile, link, put the Obj and    }
+${ ICON files in place as tool 419326, compile the phrase file.  THEN run  }
+${ SOL/INSTALL (R <SOL/INSTALL).  Same two-exec recipe as PZL-MAKE REV C.  }
+${                                                                          }
+${ 419326 IS PENCILLED IN: next after 419312 (LisaFuji) in Tim's series,   }
+${ not yet reserved on the LisaList2 tool-number list.  The number appears }
+${ only in this file (three Filemgr names and the Alert output name) and   }
+${ in SOL/INSTALL.                                                          }
+${                                                                          }
+${ SOL/ICON.BIN must be on the disk before this runs.                      }
+${==========================================================================}
+$SUBMIT SOL/COMP
+$SUBMIT SOL/LINK
+${                                                                          }
+F{ilemgr}D{elete}~{T419326~}Obj
+Y{es}D{elete}~{T419326~}PHRASE
+Y{es}D{elete}~{T419326~}ICON
+Y{es}C{opy}SOL/SOL.OBJ
+~{T419326~}Obj
+C{opy}SOL/ICON.BIN
+~{T419326~}ICON
+Q{uit}
+${                                                                          }
+R{un}Alert
+SOL/ALERTS.TEXT
+~{T419326~}
+$ENDEXEC

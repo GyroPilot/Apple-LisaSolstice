@@ -1,0 +1,911 @@
+unit SolView;
+
+{ SOL-VIEW.TEXT -- LisaSolstice (tool 419326): the pages and pictures.   }
+{ REV A  2-Nov-2026  First build (PC-checked: short spans, percent).  Builds each text page into vwRow (MAIN }
+{                    shows the lines) and draws the two pictures into the }
+{                    current port: the orbit seen from above the North    }
+{                    Pole, and the tilted Earth seen from the side.  Also }
+{                    keeps your time zone and town in SOLSTICE.DATA       }
+{                    beside the tool.  Its own segment, SOLView.          }
+
+INTERFACE
+
+uses (*$U HwInt.obj *)       HwInt,
+     (*$U UnitStd.obj *)     UnitStd,
+     (*$U UnitHz.obj *)      UnitHz,
+     (*$U Storage.obj *)     Storage,
+     (*$U QuickDraw.obj *)   QuickDraw,
+     (*$U SysCall.obj *)     SysCall,
+     (*$U SOL/UNIT.OBJ *)    SolUnit,
+     (*$U SOL/ASTRO.OBJ *)   SolAstro;
+
+const
+   vwMax   = 16;             { lines of a page }
+   vwRecLn = 40;             { bytes of SOLSTICE.DATA }
+
+type
+   VwStr = string[80];
+
+var
+   vwRow   : array [1..vwMax] of VwStr;
+   vwCnt   : integer;
+   vwZoneQ : integer;        { your time zone: quarter hours from UTC, east + }
+   vwLat   : real;           { your town: latitude, north + }
+   vwLon   : real;           { and longitude, east + }
+   vwEcode : integer;        { OS ecode of the last settings-file failure }
+   vwBuf   : array [0..47] of TwByte;
+
+procedure VwInit;
+function  VwLoad   (var vol : E_Name) : boolean;
+function  VwSave   (var vol : E_Name) : boolean;
+procedure VwSeason (dayN : longint; fr : real; guess : boolean);
+procedure VwSunNow (dayN : longint; fr : real);
+procedure VwTownPg (dayN : longint; fr : real);
+procedure VwOrbit  (dayN : longint; fr : real; var r : Rect);
+procedure VwTilt   (dayN : longint; fr : real; var r : Rect);
+procedure VwZoneTx (var txt : Str255);
+procedure VwFix1   (x : real; var txt : Str255);
+procedure VwMapTx  (dayN : longint; fr : real);
+procedure VwTime   (year : integer; var r : Rect);
+
+IMPLEMENTATION
+
+{$S SOLView}
+
+var
+   { the events around now (VwEvents): last December, this year's four, }
+   { next year's four, the March after (the Mac's five coming up)        }
+   evK : array [1..10] of integer;
+   evD : array [1..10] of longint;
+   evF : array [1..10] of real;
+   evNext : integer;         { index of the first event after now }
+
+procedure VwInit;
+{ Defaults until SOLSTICE.DATA says otherwise: Cincinnati, UTC-5. }
+begin
+   vwCnt := 0;
+   vwZoneQ := -20;
+   vwLat := 39.10;
+   vwLon := -84.51;
+   vwEcode := 0
+end;
+
+{------------------------------------------------------------------------}
+{ Lines.                                                                 }
+{------------------------------------------------------------------------}
+
+procedure VwAdd (var big : Str255);
+var n : integer;
+begin
+   if vwCnt >= vwMax then
+      exit(VwAdd);
+   vwCnt := vwCnt + 1;
+   n := length(big);
+   if n > 80 then n := 80;
+   if n = 0 then
+      vwRow[vwCnt] := ''
+   else
+      vwRow[vwCnt] := copy(big, 1, n)
+end;
+
+procedure VwBlank;
+var e : Str255;
+begin
+   e := '';
+   VwAdd(e)
+end;
+
+procedure VwFix1 {x : real; var txt : Str255};
+{ x with one decimal, a minus sign when negative: "-14.9". }
+var n    : longint;
+    part : Str255;
+begin
+   n := round(abs(x) * 10.0);
+   TwNum(n div 10, txt);
+   TwNum(n mod 10, part);
+   txt := concat(txt, concat('.', part));
+   if (x < 0) and (n > 0) then txt := concat('-', txt)
+end;
+
+procedure VwDeg (x : real; pos, neg : char; var txt : Str255);
+{ "14.9 S" style. }
+var c : string[2];
+begin
+   VwFix1(abs(x), txt);
+   c := '  ';
+   if x >= 0 then c[2] := pos else c[2] := neg;
+   txt := concat(txt, c)
+end;
+
+procedure VwClock (mins : longint; var txt : Str255);
+{ Minutes after midnight -> "3:48 PM". }
+var h, mi : longint;
+    part  : Str255;
+    ap    : string[3];
+begin
+   mins := mins mod 1440;
+   if mins < 0 then mins := mins + 1440;
+   h := mins div 60;
+   mi := mins mod 60;
+   if h >= 12 then ap := ' PM' else ap := ' AM';
+   h := h mod 12;
+   if h = 0 then h := 12;
+   TwNum(h, txt);
+   Tw2Dig(mi, part);
+   txt := concat(txt, concat(':', concat(part, ap)))
+end;
+
+procedure VwLocal (dayN : longint; fr : real; var lDay : longint; var lMin : longint);
+{ A UT moment -> your local day and minute of the day. }
+var m : longint;
+begin
+   m := round(fr * 1440.0) + vwZoneQ * 15;
+   lDay := dayN;
+   while m < 0 do begin
+      m := m + 1440;
+      lDay := lDay - 1
+   end;
+   while m >= 1440 do begin
+      m := m - 1440;
+      lDay := lDay + 1
+   end;
+   lMin := m
+end;
+
+procedure VwDate (lDay : longint; var txt : Str255);
+{ "Monday, December 21, 2026". }
+var y, m, d : integer;
+    part    : Str255;
+begin
+   SaCiv(lDay, y, m, d);
+   TwDayNm(SaWkDay(lDay), txt);
+   TwMonNm(m, part);
+   txt := concat(txt, concat(', ', part));
+   TwNum(d, part);
+   txt := concat(txt, concat(' ', part));
+   TwNum(y, part);
+   txt := concat(txt, concat(', ', part))
+end;
+
+procedure VwWhen (dayN : longint; fr : real; var txt : Str255);
+{ A UT moment in your time: "Monday, December 21, 2026, 3:48 PM". }
+var lDay, lMin : longint;
+    part       : Str255;
+begin
+   VwLocal(dayN, fr, lDay, lMin);
+   VwDate(lDay, txt);
+   VwClock(lMin, part);
+   txt := concat(txt, concat(', ', part))
+end;
+
+procedure VwZoneTx {var txt : Str255};
+{ "UTC-5", "UTC+5:30". }
+var q, h, mi : integer;
+    part     : Str255;
+begin
+   q := abs(vwZoneQ);
+   h := q div 4;
+   mi := (q mod 4) * 15;
+   TwNum(h, part);
+   if vwZoneQ < 0 then txt := concat('UTC-', part) else txt := concat('UTC+', part);
+   if mi > 0 then begin
+      Tw2Dig(mi, part);
+      txt := concat(txt, concat(':', part))
+   end
+end;
+
+procedure VwEvNm (k : integer; var txt : Str255);
+begin
+   case k of
+      0: txt := 'the March equinox';
+      1: txt := 'the June solstice';
+      2: txt := 'the September equinox';
+      3: txt := 'the December solstice'
+   end
+end;
+
+procedure VwSpan (mins : longint; var txt : Str255);
+{ "49 days, 15 hours and 7 minutes"; "3 hours and 7 minutes"; "7 minutes". }
+var d, h, mi : longint;
+    part     : Str255;
+begin
+   d := mins div 1440;
+   h := (mins mod 1440) div 60;
+   mi := mins mod 60;
+   txt := '';
+   if d > 0 then begin
+      TwNum(d, part);
+      if d = 1 then txt := concat(part, ' day, ') else txt := concat(part, ' days, ')
+   end;
+   if (d > 0) or (h > 0) then begin
+      TwNum(h, part);
+      if h = 1 then txt := concat(txt, concat(part, ' hour and '))
+      else txt := concat(txt, concat(part, ' hours and '))
+   end;
+   TwNum(mi, part);
+   if mi = 1 then txt := concat(txt, concat(part, ' minute'))
+   else txt := concat(txt, concat(part, ' minutes'))
+end;
+
+function VwMins (d1 : longint; f1 : real; d2 : longint; f2 : real) : longint;
+{ Minutes from moment 1 to moment 2. }
+begin
+   VwMins := (d2 - d1) * 1440 + round((f2 - f1) * 1440.0)
+end;
+
+{------------------------------------------------------------------------}
+{ The four events around now.                                            }
+{------------------------------------------------------------------------}
+
+procedure VwEvents (dayN : longint; fr : real);
+{ The December solstice of last year, this year's four, next year's    }
+{ four and the March equinox after; evNext is the first one after now  }
+{ (2..6, so five more always follow).                                  }
+var y, m, d, i, k : integer;
+begin
+   SaCiv(dayN, y, m, d);
+   SaEvent(y - 1, 3, evD[1], evF[1]);
+   evK[1] := 3;
+   for k := 0 to 3 do begin
+      SaEvent(y, k, evD[k + 2], evF[k + 2]);
+      evK[k + 2] := k;
+      SaEvent(y + 1, k, evD[k + 6], evF[k + 6]);
+      evK[k + 6] := k
+   end;
+   SaEvent(y + 2, 0, evD[10], evF[10]);
+   evK[10] := 0;
+   evNext := 6;
+   for i := 5 downto 2 do
+      if VwMins(dayN, fr, evD[i], evF[i]) > 0 then evNext := i
+end;
+
+procedure VwShort (dayN : longint; fr : real; var txt : Str255);
+{ A UT moment in your time, short: "Mon Dec 21 2026, 3:50 PM". }
+var lDay, lMin : longint;
+    y, m, d    : integer;
+    part       : Str255;
+begin
+   VwLocal(dayN, fr, lDay, lMin);
+   SaCiv(lDay, y, m, d);
+   TwDayNm(SaWkDay(lDay), part);
+   txt := copy(part, 1, 3);
+   TwMonNm(m, part);
+   txt := concat(txt, concat(' ', copy(part, 1, 3)));
+   TwNum(d, part);
+   txt := concat(txt, concat(' ', part));
+   TwNum(y, part);
+   txt := concat(txt, concat(' ', part));
+   VwClock(lMin, part);
+   txt := concat(txt, concat(', ', part))
+end;
+
+{------------------------------------------------------------------------}
+{ The pages.                                                             }
+{------------------------------------------------------------------------}
+
+procedure VwSeason {dayN : longint; fr : real; guess : boolean};
+var big, part : Str255;
+    i, k, pc  : integer;
+    mins, all : longint;
+begin
+   vwCnt := 0;
+   VwEvents(dayN, fr);
+   VwWhen(dayN, fr, part);
+   big := concat('Now:  ', part);
+   VwZoneTx(part);
+   big := concat(big, concat('  (', concat(part, ')')));
+   VwAdd(big);
+   if guess then begin
+      big := '      (The year is a guess: press S to set the clock and the real year.)';
+      VwAdd(big)
+   end;
+   VwBlank;
+   i := evNext;
+   VwEvNm(evK[i], part);
+   big := concat('Next: ', part);
+   VwAdd(big);
+   VwWhen(evD[i], evF[i], part);
+   big := concat('      ', concat(part, ' (your time)'));
+   VwAdd(big);
+   mins := VwMins(dayN, fr, evD[i], evF[i]);
+   VwSpan(mins, part);
+   big := concat('      in ', part);
+   VwAdd(big);
+   VwBlank;
+   { the next five, with days to go (as Solstice for Mac) }
+   big := 'Coming up:';
+   VwAdd(big);
+   for k := i to i + 4 do begin
+      VwEvNm(evK[k], part);
+      big := concat('   ', copy(part, 5, length(part) - 4));
+      while length(big) < 24 do big := concat(big, ' ');
+      VwShort(evD[k], evF[k], part);
+      big := concat(big, part);
+      while length(big) < 52 do big := concat(big, ' ');
+      mins := VwMins(dayN, fr, evD[k], evF[k]) div 1440;
+      if mins < 1 then
+         big := concat(big, 'today')
+      else begin
+         TwNum(mins, part);
+         if mins = 1 then big := concat(big, concat('in ', concat(part, ' day')))
+         else big := concat(big, concat('in ', concat(part, ' days')))
+      end;
+      VwAdd(big)
+   end;
+   VwBlank;
+   { the season, and how far into it }
+   k := evK[i - 1];
+   case k of
+      0: big := 'Spring in the north, autumn in the south: ';
+      1: big := 'Summer in the north, winter in the south: ';
+      2: big := 'Autumn in the north, spring in the south: ';
+      3: big := 'Winter in the north, summer in the south: '
+   end;
+   all := VwMins(evD[i - 1], evF[i - 1], evD[i], evF[i]);
+   if all > 0 then
+      pc := trunc(100.0 * VwMins(evD[i - 1], evF[i - 1], dayN, fr) / all)
+   else
+      pc := 0;
+   TwNum(pc, part);
+   big := concat(big, concat(part, ' percent of the way'));
+   VwAdd(big);
+   VwEvNm(evK[i - 1], part);
+   big := concat('from ', part);
+   VwEvNm(evK[i], part);
+   big := concat(big, concat(' to ', concat(part, '.')));
+   VwAdd(big)
+end;
+
+procedure VwMapTx {dayN : longint; fr : real};
+{ The two lines under the world map, into vwRow[1] and vwRow[2]. }
+var big, part : Str255;
+    mins      : longint;
+begin
+   vwCnt := 0;
+   SaSun(dayN, fr);
+   mins := round(fr * 1440.0);
+   if mins >= 1440 then mins := mins - 1440;
+   Tw2Dig(mins div 60, part);
+   big := concat('At ', part);
+   Tw2Dig(mins mod 60, part);
+   big := concat(big, concat(':', concat(part, ' UT the Sun is overhead at ')));
+   VwDeg(saSubLt, 'N', 'S', part);
+   big := concat(big, part);
+   VwDeg(saSubLn, 'E', 'W', part);
+   big := concat(big, concat(', ', concat(part, ': the ringed dot.')));
+   VwAdd(big);
+   big := 'The cross is your town.  Gray sea is night.  Map: Natural Earth (public domain).';
+   VwAdd(big)
+end;
+
+procedure VwSunNow {dayN : longint; fr : real};
+var big, part : Str255;
+    lam       : real;
+begin
+   vwCnt := 0;
+   SaSun(dayN, fr);
+   big := 'Where the Sun is now';
+   VwAdd(big);
+   VwBlank;
+   VwDeg(saSubLt, 'N', 'S', part);
+   big := concat('Straight overhead at ', part);
+   VwDeg(saSubLn, 'E', 'W', part);
+   big := concat(big, concat(', ', part));
+   VwAdd(big);
+   big := '(that spot moves 15 degrees west every hour, as the Earth turns).';
+   VwAdd(big);
+   VwBlank;
+   VwFix1(saDecl, part);
+   big := concat('The Sun''s declination is ', concat(part, ' degrees: +23.4 at the June'));
+   VwAdd(big);
+   big := 'solstice, -23.4 at the December solstice, 0 at both equinoxes.';
+   VwAdd(big);
+   VwBlank;
+   VwFix1(abs(saEoT), part);
+   if saEoT >= 0 then
+      big := concat('A sundial is ', concat(part, ' minutes AHEAD of the clock today'))
+   else
+      big := concat('A sundial is ', concat(part, ' minutes BEHIND the clock today'));
+   big := concat(big, ' (the equation');
+   VwAdd(big);
+   big := 'of time: the orbit is an ellipse and the axis is tilted).';
+   VwAdd(big);
+   VwBlank;
+   lam := saLam;
+   VwFix1(lam, part);
+   big := concat('Since the March equinox the Earth has gone ', concat(part, ' degrees'));
+   VwAdd(big);
+   TwNum(round(lam / 3.6), part);
+   big := concat('around the Sun: ', concat(part, ' percent of the year''s orbit.'));
+   VwAdd(big)
+end;
+
+procedure VwDayLn (dayN : longint; var txt : Str255);
+{ The length of daylight in your town that day: "9 h 21 m". }
+var rc       : integer;
+    ri, se   : real;
+    m        : longint;
+    part     : Str255;
+begin
+   rc := SaRise(dayN, vwLat, vwLon, ri, se);
+   if rc = 1 then
+      txt := 'no sunrise at all'
+   else if rc = 2 then
+      txt := 'the Sun never sets'
+   else begin
+      m := round((se - ri) * 60.0);
+      TwNum(m div 60, txt);
+      TwNum(m mod 60, part);
+      txt := concat(txt, concat(' h ', concat(part, ' m')))
+   end
+end;
+
+procedure VwTownPg {dayN : longint; fr : real};
+var big, part  : Str255;
+    lDay, lMin : longint;
+    rc         : integer;
+    ri, se     : real;
+    y, m, d    : integer;
+    jd, dd     : longint;
+    jf, df     : real;
+begin
+   vwCnt := 0;
+   VwDeg(vwLat, 'N', 'S', part);
+   big := concat('Your town: ', part);
+   VwDeg(vwLon, 'E', 'W', part);
+   big := concat(big, concat(', ', part));
+   VwZoneTx(part);
+   big := concat(big, concat('   time zone ', part));
+   VwAdd(big);
+   big := '(Seasons menu: Set Your Town ... and Set Your Time Zone ...)';
+   VwAdd(big);
+   VwBlank;
+   VwLocal(dayN, fr, lDay, lMin);
+   rc := SaRise(lDay, vwLat, vwLon, ri, se);
+   VwDate(lDay, part);
+   big := concat('Today, ', part);
+   VwAdd(big);
+   if rc = 0 then begin
+      VwClock(round(ri * 60.0) + vwZoneQ * 15, part);
+      big := concat('   Sunrise ', part);
+      VwClock(round(se * 60.0) + vwZoneQ * 15, part);
+      big := concat(big, concat('   Sunset ', part));
+      VwDayLn(lDay, part);
+      big := concat(big, concat('   Daylight ', part));
+      VwAdd(big)
+   end
+   else begin
+      VwDayLn(lDay, part);
+      big := concat('   ', part);
+      VwAdd(big)
+   end;
+   SaSun(lDay, 0.5 - vwLon / 360.0);
+   VwFix1(90.0 - abs(vwLat - saDecl), part);
+   big := concat('   The Sun at noon is ', concat(part, ' degrees above the horizon.'));
+   VwAdd(big);
+   VwBlank;
+   SaCiv(lDay, y, m, d);
+   SaEvent(y, 1, jd, jf);
+   SaEvent(y, 3, dd, df);
+   VwDayLn(jd, part);
+   big := concat('On the June solstice:      ', part);
+   VwAdd(big);
+   VwDayLn(dd, part);
+   big := concat('On the December solstice:  ', part);
+   VwAdd(big);
+   SaEvent(y, 0, jd, jf);
+   VwDayLn(jd, part);
+   big := concat('On the equinoxes:          about ', part);
+   VwAdd(big)
+end;
+
+{------------------------------------------------------------------------}
+{ Pictures.                                                              }
+{------------------------------------------------------------------------}
+
+procedure VwText (x, y : integer; s : Str255);
+begin
+   MoveTo(x, y);
+   DrawString(s)
+end;
+
+procedure VwDot (x, y, rx, ry : integer; fill : boolean);
+var r : Rect;
+begin
+   SetRect(r, x - rx, y - ry, x + rx + 1, y + ry + 1);
+   if fill then PaintOval(r) else begin
+      EraseOval(r);
+      FrameOval(r)
+   end
+end;
+
+procedure VwOrbit {dayN : longint; fr : real; var r : Rect};
+{ The orbit from above the North Pole: the Sun in the middle, the four  }
+{ events marked, the Earth where it is now.  Lisa pixels are taller     }
+{ than wide, so a circle is 1.45 times wider in pixels than tall.       }
+var cx, cy, ry, rx : integer;
+    o              : Rect;
+    a              : real;
+    x, y, k        : integer;
+    s              : Str255;
+begin
+   cx := (r.left + r.right) div 2;
+   cy := (r.top + r.bottom) div 2;
+   ry := (r.bottom - r.top) div 2 - 22;
+   rx := round(ry * 1.45);
+   SetRect(o, cx - rx, cy - ry, cx + rx, cy + ry);
+   FrameOval(o);
+   VwDot(cx, cy, 9, 6, true);
+   VwText(cx - 12, cy + 20, 'Sun');
+   { the events: the Earth's longitude 180 (March), 270, 0, 90 }
+   for k := 0 to 3 do begin
+      a := (180.0 + 90.0 * k) * saPi / 180.0;
+      x := cx + round(rx * cos(a));
+      y := cy - round(ry * sin(a));
+      VwDot(x, y, 4, 3, false);
+      case k of
+         0: VwText(x - 70, y + 4, 'March');
+         1: VwText(x - 18, y + 18, 'June');
+         2: VwText(x + 10, y + 4, 'September');
+         3: VwText(x - 30, y - 9, 'December')
+      end
+   end;
+   SaSun(dayN, fr);
+   a := saEarth * saPi / 180.0;
+   x := cx + round(rx * cos(a));
+   y := cy - round(ry * sin(a));
+   VwDot(x, y, 9, 6, true);
+   VwDate(dayN, s);
+   if x >= cx then VwText(x + 14, y - 6, 'Earth now') else VwText(x - 80, y - 6, 'Earth now');
+   { two short lines in the corner, clear of the June label (PC check) }
+   VwText(r.left + 4, r.bottom - 18, 'Seen from above the North Pole,');
+   VwText(r.left + 4, r.bottom - 4, 'the Earth goes counterclockwise.')
+end;
+
+procedure VwLine (x1, y1, x2, y2 : integer);
+{ A line.  In LisaEm (2-Nov-2026, diagnostic build) a LineTo steeper than }
+{ 45 degrees drew nothing while flatter ones drew; so a steep line is     }
+{ drawn a row at a time, each row a 2-pixel flat piece.                   }
+var dx, dy, y, x, t : integer;
+    n               : longint;
+begin
+   dx := x2 - x1;
+   dy := y2 - y1;
+   if abs(dy) <= abs(dx) then begin
+      MoveTo(x1, y1);
+      LineTo(x2, y2)
+   end
+   else begin
+      if dy < 0 then begin
+         t := x1; x1 := x2; x2 := t;
+         t := y1; y1 := y2; y2 := t;
+         dx := -dx;
+         dy := -dy
+      end;
+      for y := y1 to y2 do begin
+         n := dx;
+         n := n * (y - y1);
+         x := x1 + n div dy;
+         MoveTo(x, y);
+         LineTo(x + 1, y)
+      end
+   end
+end;
+
+procedure VwChord (cx, cy, rr : integer; tau, phi : real);
+{ A latitude line phi (degrees) on the Earth drawn from the side, axis  }
+{ leaning tau degrees toward the Sun (on the left).                     }
+var t, p          : real;
+    ux, uy, vx, vy : real;
+    px, py, h     : real;
+begin
+   t := tau * saPi / 180.0;
+   p := phi * saPi / 180.0;
+   ux := -sin(t);  uy := cos(t);       { north, y up }
+   vx := cos(t);   vy := sin(t);
+   px := rr * sin(p) * ux;  py := rr * sin(p) * uy;
+   h := rr * cos(p);
+   MoveTo(cx + round(1.45 * (px - h * vx)), cy - round(py - h * vy));
+   LineTo(cx + round(1.45 * (px + h * vx)), cy - round(py + h * vy))
+end;
+
+procedure VwTilt {dayN : longint; fr : real; var r : Rect};
+{ The Sun on the left, the Earth on the right with its axis tilted       }
+{ 23.4 degrees; how much of that tilt leans toward the Sun depends on    }
+{ where the Earth is in its orbit (most at the solstices, none at the    }
+{ equinoxes).  The far half is night.                                    }
+var cx, cy, rr, sx : integer;
+    e              : Rect;
+    tau, t         : real;
+    st, ct         : real;
+    ax, ay, nx, ny : integer;
+    i              : integer;
+    s              : Str255;
+begin
+   SaSun(dayN, fr);
+   tau := 23.44 * sin(saLam * saPi / 180.0);
+   sx := r.left + 50;
+   cy := (r.top + r.bottom) div 2;
+   rr := (r.bottom - r.top) div 2 - 40;
+   cx := r.right - round(rr * 1.45) - 60;
+   { the Sun and its light }
+   VwDot(sx, cy, 24, 17, true);
+   VwText(sx - 12, cy + 34, 'Sun');
+   for i := -2 to 2 do begin
+      MoveTo(sx + 40, cy + i * 18);
+      LineTo(cx - round(rr * 1.45) - 12, cy + i * 18)
+   end;
+   { the Earth: night on the far side }
+   SetRect(e, cx - round(rr * 1.45), cy - rr, cx + round(rr * 1.45), cy + rr);
+   EraseOval(e);
+   FillArc(e, 0, 180, ltGray);
+   FrameOval(e);
+   { the axis and the lines of latitude }
+   t := tau * saPi / 180.0;
+   st := sin(t);
+   ct := cos(t);
+   ax := round(1.45 * (rr + 22) * st);
+   ay := round((rr + 22) * ct);
+   nx := cx - round(1.45 * (rr + 32) * st) - 3;
+   ny := cy - round((rr + 32) * ct) + 4;
+   VwText(nx, ny, 'N');
+   VwChord(cx, cy, rr, tau, 0.0);
+   VwChord(cx, cy, rr, tau, 23.44);
+   VwChord(cx, cy, rr, tau, -23.44);
+   VwChord(cx, cy, rr, tau, 66.56);
+   VwChord(cx, cy, rr, tau, -66.56);
+   { the axis is steep: VwLine draws it a row at a time }
+   VwLine(cx - ax, cy - ay, cx + ax, cy + ay);
+   VwLine(cx - ax + 1, cy - ay, cx + ax + 1, cy + ay);
+   VwFix1(abs(tau), s);
+   if tau > 0.5 then
+      s := concat('The north leans ', concat(s, ' degrees toward the Sun: longer days up north.'))
+   else if tau < -0.5 then
+      s := concat('The north leans ', concat(s, ' degrees away from the Sun: shorter days up north.'))
+   else
+      s := 'Neither pole leans toward the Sun: day and night are equal everywhere.';
+   VwText(r.left + 4, r.bottom - 4, s)
+end;
+
+{------------------------------------------------------------------------}
+{ The Solstice Traditions timeline (Tim and Connie O'Connor's, updated). }
+{------------------------------------------------------------------------}
+
+procedure VwTlRow (i : integer; var lab : Str255; var start : integer);
+{ Row i (1 = the top, the newest); start is the year, minus for BC;     }
+{ start 0 = older than written history (the evergreens).                }
+begin
+   case i of
+      1: begin lab := 'Family Christmas: a US holiday'; start := 1870 end;
+      2: begin lab := 'Christmas back in Massachusetts'; start := 1681 end;
+      3: begin lab := 'Christmas trees, Germany'; start := 1521 end;
+      4: begin lab := 'December 25 in Rome''s calendar'; start := 336 end;
+      5: begin lab := 'Saturnalia: gifts and feasting'; start := -217 end;
+      6: begin lab := 'The sun chariot, Denmark'; start := -1400 end;
+      7: begin lab := 'Stonehenge: midwinter sunset'; start := -2500 end;
+      8: begin lab := 'Newgrange: midwinter sunrise'; start := -3200 end;
+      9: begin lab := 'Goseck circle: solstice gates'; start := -4900 end;
+      otherwise begin lab := 'Evergreens at midwinter'; start := 0 end
+   end
+end;
+
+procedure VwComma (n : longint; var txt : Str255);
+{ 6900 -> "6,900". }
+var part : Str255;
+begin
+   if n >= 1000 then begin
+      TwNum(n div 1000, txt);
+      TwNum(1000 + n mod 1000, part);
+      txt := concat(txt, concat(',', copy(part, 2, 3)))
+   end
+   else
+      TwNum(n, txt)
+end;
+
+procedure VwTime {year : integer; var r : Rect};
+{ Ten rows and the time axis inside r.  x0..x1 is 5000 BC to now. }
+var i, y, x0, x1, xa, w, rowH, ay, k : integer;
+    start                          : integer;
+    n                              : longint;
+    lab, tag, part                 : Str255;
+    b                              : Rect;
+
+   function TlX (yr : integer) : integer;
+   var t : longint;
+   begin
+      t := yr;
+      t := (t + 5000) * (x1 - x0);
+      TlX := x0 + t div (year + 5000)
+   end;
+
+begin
+   x0 := r.left + 232;
+   x1 := r.right - 14;
+   rowH := (r.bottom - r.top - 30) div 10;
+   for i := 1 to 10 do begin
+      VwTlRow(i, lab, start);
+      y := r.top + (i - 1) * rowH;
+      VwText(r.left + 4, y + 11, lab);
+      if start = 0 then begin
+         { older than written history: dashes that turn solid }
+         k := x0;
+         while k < x0 + 120 do begin
+            SetRect(b, k, y + 6, k + 6, y + 9);
+            PaintRect(b);
+            k := k + 12
+         end;
+         SetRect(b, x0 + 120, y + 6, x1, y + 9);
+         PaintRect(b);
+         tag := 'older than written history: thousands';
+         VwText(x0 + 126, y + 3, tag)
+      end
+      else begin
+         if start < 0 then n := year + (-start) else n := year - start + 1;
+         if n >= 2000 then n := (n div 100) * 100 else n := (n div 10) * 10;
+         VwComma(n, part);
+         tag := concat('over ', part);
+         xa := TlX(start);
+         SetRect(b, xa, y + 6, x1, y + 9);
+         PaintRect(b);
+         w := StringWidth(tag);
+         if xa - w - 6 > x0 then
+            VwText(xa - w - 6, y + 11, tag)
+         else
+            VwText(xa + 4, y + 3, tag)
+      end;
+      { the arrowhead at now }
+      SetRect(b, x1, y + 4, x1 + 2, y + 11);  PaintRect(b);
+      SetRect(b, x1 + 2, y + 5, x1 + 4, y + 10);  PaintRect(b);
+      SetRect(b, x1 + 4, y + 6, x1 + 6, y + 9);  PaintRect(b)
+   end;
+   { the axis }
+   ay := r.top + 10 * rowH + 4;
+   SetRect(b, x0, ay, x1, ay + 1);
+   PaintRect(b);
+   for k := 0 to 7 do begin
+      case k of
+         0: begin i := -5000; part := '5000 BC' end;
+         1: begin i := -4000; part := '4000' end;
+         2: begin i := -3000; part := '3000' end;
+         3: begin i := -2000; part := '2000' end;
+         4: begin i := -1000; part := '1000 BC' end;
+         5: begin i := 1;     part := 'AD 1' end;
+         6: begin i := 1000;  part := '1000' end;
+         7: begin i := 2000;  part := '2000' end
+      end;
+      xa := TlX(i);
+      SetRect(b, xa, ay, xa + 1, ay + 5);
+      PaintRect(b);
+      w := StringWidth(part);
+      VwText(xa - w div 2, ay + 17, part)
+   end
+end;
+
+{------------------------------------------------------------------------}
+{ SOLSTICE.DATA: "SO1 zone lat lon" (zone in quarter hours, lat and lon  }
+{ in hundredths of a degree), padded to vwRecLn bytes.                  }
+{------------------------------------------------------------------------}
+
+procedure VwPutS (var s : Str255);
+var i : integer;
+begin
+   for i := 0 to vwRecLn - 1 do vwBuf[i] := 32;
+   for i := 1 to length(s) do
+      if i <= vwRecLn - 1 then vwBuf[i - 1] := ord(s[i]);
+   vwBuf[vwRecLn - 1] := 13
+end;
+
+function VwPut (var path : Pathname) : boolean;
+{ Write vwBuf (vwRecLn bytes) to path, making the file if needed. }
+var refnum   : integer;
+    wrote    : longint;
+    ec       : integer;
+    schedErr : integer;
+begin
+   VwPut := false;
+   Sched_Class(schedErr, false);
+   MAKE_FILE(vwEcode, path, 0);
+   Sched_Class(schedErr, true);
+   if (vwEcode > 0) and (vwEcode <> 890) then
+      exit(VwPut);
+   Sched_Class(schedErr, false);
+   OPEN(vwEcode, path, refnum, [DWrite]);
+   Sched_Class(schedErr, true);
+   if vwEcode > 0 then
+      exit(VwPut);
+   Sched_Class(schedErr, false);
+   WRITE_DATA(vwEcode, refnum, ord4(@vwBuf), vwRecLn, wrote, sequential, 0);
+   if (vwEcode <= 0) and (wrote = vwRecLn) then begin
+      TRUNCATE(ec, refnum);
+      VwPut := true
+   end;
+   CLOSE_OBJECT(ec, refnum);
+   Sched_Class(schedErr, true);
+   if vwEcode < 0 then vwEcode := 0
+end;
+
+function VwSave {var vol : E_Name} : boolean;
+{ A damaged SOLSTICE.DATA (ecode 663, a bad block) must not stop the    }
+{ settings being kept: if the write fails, kill the file and make it    }
+{ again (LOS_PROGRAMMING_NOTES lesson 74).                              }
+var path     : Pathname;
+    s, part  : Str255;
+    ec       : integer;
+    schedErr : integer;
+    ok       : boolean;
+begin
+   s := 'SO1 ';
+   TwNum(vwZoneQ + 1000, part);
+   s := concat(s, concat(part, ' '));
+   TwNum(round(vwLat * 100.0) + 100000, part);
+   s := concat(s, concat(part, ' '));
+   TwNum(round(vwLon * 100.0) + 100000, part);
+   s := concat(s, part);
+   VwPutS(s);
+   path := concat(vol, 'SOLSTICE.DATA');
+   ok := VwPut(path);
+   if not ok then begin
+      Sched_Class(schedErr, false);
+      KILL_OBJECT(ec, path);
+      Sched_Class(schedErr, true);
+      ok := VwPut(path)
+   end;
+   VwSave := ok
+end;
+
+function VwField (var i : integer; var n : longint) : boolean;
+{ The next number in vwBuf from position i (digits only). }
+var got : boolean;
+begin
+   while (i < vwRecLn) and (vwBuf[i] = 32) do i := i + 1;
+   n := 0;
+   got := false;
+   while (i < vwRecLn) and (vwBuf[i] >= 48) and (vwBuf[i] <= 57) do begin
+      n := n * 10 + (vwBuf[i] - 48);
+      got := true;
+      i := i + 1
+   end;
+   VwField := got
+end;
+
+function VwLoad {var vol : E_Name} : boolean;
+var path     : Pathname;
+    refnum   : integer;
+    got      : longint;
+    ec       : integer;
+    schedErr : integer;
+    i        : integer;
+    z, a, b  : longint;
+begin
+   VwLoad := false;
+   path := concat(vol, 'SOLSTICE.DATA');
+   Sched_Class(schedErr, false);
+   OPEN(ec, path, refnum, [DRead]);
+   Sched_Class(schedErr, true);
+   if ec > 0 then
+      exit(VwLoad);
+   got := 0;
+   Sched_Class(schedErr, false);
+   READ_DATA(ec, refnum, ord4(@vwBuf), vwRecLn, got, sequential, 0);
+   CLOSE_OBJECT(ec, refnum);
+   Sched_Class(schedErr, true);
+   if got < vwRecLn then
+      exit(VwLoad);
+   if (vwBuf[0] <> ord('S')) or (vwBuf[1] <> ord('O')) or (vwBuf[2] <> ord('1')) then
+      exit(VwLoad);
+   i := 3;
+   if not VwField(i, z) then exit(VwLoad);
+   if not VwField(i, a) then exit(VwLoad);
+   if not VwField(i, b) then exit(VwLoad);
+   z := z - 1000;
+   a := a - 100000;
+   b := b - 100000;
+   if (z < -48) or (z > 56) or (a < -9000) or (a > 9000) or (b < -18000) or (b > 18000) then
+      exit(VwLoad);
+   vwZoneQ := z;
+   vwLat := a / 100.0;
+   vwLon := b / 100.0;
+   VwLoad := true
+end;
+
+end.

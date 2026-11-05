@@ -1,0 +1,229 @@
+unit SolGlobals;
+{ REV A  2-Nov-2026  LisaSolstice (tool 419326) starts as a copy of      }
+{                      LisaTwinClock REV K: the twin-year clock, set by  }
+{                      hand (S) or from a FujiNet (N), is built in, so   }
+{                      the tool stands alone.  New: the Seasons menu     }
+{                      (menu 4), pages and pictures (SOL-VIEW), the      }
+{                      astronomy (SOL-ASTRO), fun facts (alerts 20-29).  }
+
+{ REV D  17-Oct-2026  1.1: the Network menu (menu 3): set the clock    }
+{                      from the network, three sources, two speeds.    }
+{                      Help and Version move to 4 and 5.  esZone, ck*. }
+
+{ REV A  10-Oct-2026  First increment of LisaTwinClock (tool 419326 --   }
+{                      number PENCILLED IN, not yet reserved on the     }
+{                      LisaList2 list).  Shared state and the Filer     }
+{                      handshake, cloned from LFU-GLOBALS REV I         }
+{                      (LisaFileMover 1.1, proven on the 2/10).         }
+
+{ SOL-GLOBALS.TEXT -- LisaTwinClock.                                     }
+{ Sets the Lisa's clock from today's real date.  The Lisa's clock only  }
+{ counts 1981 to 1995, so the tool uses a TWIN YEAR: a year inside     }
+{ that range with the same calendar as the real year (2026 -> 1987).   }
+{ The twin-year arithmetic, the clock calls and the note file are in   }
+{ SOL-UNIT (unit SolUnit), which LisaFuji will link as well.  This     }
+{ unit is state only.                                                   }
+
+INTERFACE
+
+uses (*$U UnitStd.obj *)   UnitStd,
+     (*$U UnitHz.obj *)    UnitHz,
+     (*$U Storage.obj *)   Storage,
+     (*$U QuickDraw.obj *) QuickDraw,
+     (*$U Fontmgr.obj *)   FontMgr,
+     (*$U SysCall.obj *)   SysCall,
+     (*$U wm.events.obj *) Events,
+     (*$U wm.folders.obj *) Folders,
+     (*$U wm.menus.obj *)  Menus,
+     (*$U AlertMgr.obj *)  AlertMgr,
+     (*$U WMLstd.obj *)    WMLstd,
+     (*$U WMlCrs.obj *)    WMLCrs,
+     (*$U FilerComm.obj *) FilerComm;
+
+const
+   solVersion = 'LisaSolstice 0.1';    { REV A 2-Nov-2026 }
+
+   winW = 660;                { the status window }
+   winH = 300;
+   maxLines = 17;             { status lines kept and drawn }
+   lineHt   = 16;
+   numCap   = 4;              { digits typed at a prompt }
+   baseYear = 2026;           { year offered when no note file exists }
+
+   { entry steps: which value the typed prompt is asking for }
+   esNone  = 0;
+   esYear  = 1;
+   esMonth = 2;
+   esDay   = 3;
+   esHour  = 4;
+   esMin   = 5;
+   esZone  = 6;               { a time zone name (REV D) }
+   esUtc   = 7;               { LisaSolstice: hours from UTC (- for west) }
+   esLat   = 8;               { your latitude, degrees (- for south) }
+   esLon   = 9;               { your longitude, degrees (- for west) }
+
+   { Menus.  A '-' separator COUNTS as an item position.                 }
+   mFile = 1;                 { "File/Print" }
+      miAsideAll = 1;
+      miAside    = 2;
+      { 3 is a separator }
+      miPutAway  = 4;
+
+   mClock = 2;                { "Clock" }
+      miSet  = 1;             { Set Clock .../S }
+      miShow = 2;             { Show Lisa Clock/C }
+
+   mNet = 3;                  { "Network" (REV D) }
+      miNetSet  = 1;          { Set from the Network/N }
+      { 2 is a separator }
+      miSrcFuji = 3;          { Use the FujiNet's Clock }
+      miSrcTown = 4;          { Use the Web, for Your Town }
+      miSrcZone = 5;          { Use the Web, for a Time Zone ... }
+      { 6 is a separator }
+      miBd9600  = 7;          { Use 9600 baud }
+      miBd19200 = 8;          { Use 19200 baud }
+
+   mSeason = 4;               { "Seasons" (LisaSolstice REV A) }
+      miDays   = 1;           { Days to the Next Season/D }
+      miOrbit  = 2;           { The Earth's Orbit/O }
+      miTilt   = 3;           { The Earth's Tilt/E }
+      miSunNow = 4;           { Where the Sun Is Now/W }
+      miMapNow = 5;           { Day and Night Now/M (from Solstice for Mac) }
+      miTown   = 6;           { Your Town/Y }
+      { 7 is a separator }
+      miSetTwn = 8;           { Set Your Town ... }
+      miSetZon = 9;           { Set Your Time Zone ... }
+      { 10 is a separator }
+      miFact   = 11;          { A Fun Fact/F }
+      miSolar  = 12;          { The Solargraph/G (the splash picture) }
+      miTrad   = 13;          { Solstice Traditions/L (the timeline) }
+      miPhotos = 14;          { Pictures from History/P (REV B, SOL-PHO) }
+   mHelp = 5;                 { "Help" }
+      miHelpUse  = 1;         { How to Use/H }
+      miHelpTwin = 2;         { About Twin Years/T }
+   mVer = 6;                  { "Version" }
+      miAbout = 1;
+   lastBarMenu = 6;
+   lastMenu    = 6;
+   { the window shows a page of lines, or a picture under a few lines }
+   pgText  = 0;
+   pgOrbit = 1;
+   pgTilt  = 2;
+   pgSplash = 3;              { Tim's solargraph, SOL-PIC (opens on it) }
+   pgMap    = 4;              { day and night on the world map, SOL-MAP }
+   pgTime   = 5;              { the Solstice Traditions timeline }
+   pgPhoto  = 6;              { pictures from the talk, SOL-PHO (REV B) }
+
+   alertVerNum = 1;
+   alrtSetGo  = 10;           { caution cancel: set the clock as shown? }
+   alrtAbou   = 11;           { the About box }
+   alrtFail   = 12;           { the clock was not set -- see the window }
+   alrtNoTwin = 13;           { caution cancel: no twin year this year }
+   alrtFact0  = 20;           { the fun facts: alerts 20 .. 20 + nFacts - 1 }
+   nFacts     = 25;                { 2 Nov night: 25 (Tim liked the list) }
+
+   { Heap: only the alert cache lives here.  4,000 integers = 8,000 bytes. }
+   maxHeap = 4000;
+
+type
+   StatStr = string[80];
+
+var
+   theEvent  : EventRecord;
+   myWindow  : WindowPtr;
+   toldToDie : boolean;
+   initing   : boolean;
+   myMenus   : array [1..lastMenu] of MenuInfo;
+   allAlerts : TAlertFile;
+   myZone    : array [0..maxHeap] of integer;
+
+   { the status pane: a short list of lines }
+   statLine  : array [1..maxLines] of StatStr;
+   statCnt   : integer;
+   quiet     : boolean;       { TRUE while a page is being built; AddLine }
+                              { then skips the repaint }
+
+   myVol     : E_Name;        { the device this tool lives on, e.g. -#12- }
+
+   { the typed prompt on the last status line }
+   promptOn  : boolean;
+   promptStep : integer;      { esYear .. esMin }
+   promptTxt : StatStr;       { digits typed so far }
+   promptLbl : StatStr;       { the label drawn before them }
+
+   { values entered in this run of Set Clock }
+   inYear    : integer;
+   inMonth   : integer;
+   inDay     : integer;
+   inHour    : integer;
+   inMin     : integer;
+
+   { defaults offered in [brackets]; -1 = none, the value must be typed }
+   dfYear    : integer;
+   dfMonth   : integer;
+   dfDay     : integer;
+   dfHour    : integer;
+   dfMin     : integer;
+
+   { the network time waiting for Y (REV D) }
+   ckMode    : integer;       { 1 = Y sets the clock }
+   ckY       : integer;
+   ckMo      : integer;
+   ckD       : integer;
+   ckH       : integer;
+   ckMi      : integer;
+   ckTwin    : integer;
+   ckDoy     : integer;
+   { LisaSolstice REV A }
+   pageMode  : integer;       { pgText, pgOrbit or pgTilt }
+   factNo    : integer;       { the next fun fact, 0 .. nFacts - 1 }
+   inUtcQ    : integer;       { a typed time zone, quarter hours east + }
+   inLatT    : real;          { a typed latitude, waiting for the longitude }
+   mpL1      : StatStr;       { the two lines under the map }
+   mpL2      : StatStr;
+   tlYear    : integer;       { the year the timeline counts to }
+   phNo      : integer;       { the picture on page P, 1 .. phN (REV B) }
+   pgDay     : longint;       { the moment the page or picture shows: UT days }
+   pgFr      : real;          { since 1 Jan 2000, and the fraction of that day }
+
+procedure HandleFilerOp (var wantsOpen : boolean);
+
+
+IMPLEMENTATION
+
+procedure HandleFilerOp {var wantsOpen : boolean};
+var fx  : FilerExt;
+    err : integer;
+begin
+   wantsOpen := false;
+   GetAddParms(err, theEvent, fx);
+
+   case fx.theFlrOp of
+
+      fcNone :
+         wantsOpen := true;              { the user opened the tool }
+
+      fcResume :
+         TellFiler(err, docClosd, internalError, theEvent.who);
+
+      fcClose, fcSuspend, fcShred :
+         begin
+            myWindow := nil;
+            TellFiler(err, docClosd, allOK, theEvent.who)
+         end;
+
+      fcCopy, fcPut :
+         TellFiler(err, docNotXfered, internalError, theEvent.who);
+
+      fcDfClose :
+         TellFiler(err, dfClosed, allOK, theEvent.who);
+
+      fcTerminate :
+         toldToDie := true;
+
+      otherwise
+
+   end
+end;
+
+end.

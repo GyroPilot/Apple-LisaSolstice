@@ -1,0 +1,279 @@
+; ==========================================================================
+;  SOL-ALERTS.TEXT -- phrase-file source for LisaSolstice (419326).
+;  Compiled by the Workshop 'Alert' tool into T419326PHRASE.
+;  Comments on their OWN lines; blank lines are STRUCTURAL; alert numbers
+;  ascend and 1 and 2 are REQUIRED; each section ends with a lone 0.
+; ==========================================================================
+;
+; REV A -- 2-Nov-2026: LisaSolstice 0.1, forked from LisaTwinClock REV K
+; (its alerts 10-13 and menus 1-3 kept: the clock is built in).  New: the
+; Seasons menu (4), Help 5, Version 6, the fun facts (alerts 20-29, F
+; shows them in turn).  The facts are stand-ins until Tim's own arrive.
+; 2 Nov night: 25 facts (alerts 20-44), from SOLSTICE_FACTS_AND_TIMELINE_2026-11-02.md (Tim: liked them).
+; Later on 2 Nov: The Solargraph/G (the splash) and Day and Night Now/M (from Solstice for Mac).
+; Cache bytes 4000: well above what the Alert tool suggests for a file
+; this small (below its suggestion the tool pauses for a keypress and
+; eats the next line of the MAKE exec -- the InstallTool lesson).
+; Menus are matched BY POSITION against the mi* constants in SOL-GLOBALS;
+; a '-' separator counts as a position.  Keep the two files in lockstep.
+;
+; ---- FILE HEADER ---------------------------------------------------------
+1
+4
+4000
+?
+Wait
+Stop
+Note
+Caution
+Cancel
+OK
+
+; ==== ALERTS ==============================================================
+;
+1 note alert
+LisaSolstice could not find the message that belongs here.
+If you cannot proceed, mention the number ^N.
+
+2 stop alert
+LisaSolstice is having trouble reaching the disk that holds the
+tool.^L^L
+Put your documents away one at a time, or press the on-off button to
+save them all.
+
+10 caution cancel alert
+Set the Lisa's clock to the date and time shown in the window?^L^L
+The year will read as the twin year.  File dates made from now on
+use it.
+
+11 note alert
+LisaSolstice 0.1   (4 November 2026)^L^L
+The seasons on the Lisa: the next solstice and equinox, the
+Earth's orbit and tilt, where the Sun is overhead, sunrise and
+sunset in your town, and day and night on a map.^L^L
+The opening picture is the author's solargraph: a pinhole camera
+in a pop can on his roof from the June to the December solstice.
+Solstice history from Tim and Connie O'Connor's Winter Solstice
+talk.  Photos (Wikimedia Commons): Newgrange sunlight by Dentp,
+CC BY-SA 4.0; Stonehenge sunset by Jeffrey Pfau, CC BY-SA 3.0.^L^L
+Tool 419326.  T. O'Connor (bmwcyclist), 2026.
+
+12 note alert
+The clock was not set.^L^L
+The window shows what happened.  If the old time was valid it has been
+put back.
+
+13 caution cancel alert
+This year has no twin year.^L^L
+The Lisa will be set to 1988.  Every date will be right, but the
+weekday names the Lisa shows will be wrong all year.  Set the clock?
+
+20 note alert
+A solstice fact (1 of 25)^L^L
+"Solstice" comes from the Latin sol, the Sun, and sistere, to
+stand still. For a few days around a solstice the Sun's height
+at noon hardly changes from one day to the next.
+
+21 note alert
+A solstice fact (2 of 25)^L^L
+The seasons come from the Earth's tilt, not its distance from
+the Sun. The Earth is closest to the Sun in early January, in
+the middle of the northern winter.
+
+22 note alert
+A solstice fact (3 of 25)^L^L
+The Earth moves fastest when it is closest to the Sun, so the
+northern winter is the shortest season, about 89 days. The
+northern summer is the longest, about 93 and a half.
+
+23 note alert
+A solstice fact (4 of 25)^L^L
+The shortest day does not have the earliest sunset. In
+Cincinnati the earliest sunset comes in early December and the
+latest sunrise in early January. Press Y in December to watch it
+happen.
+
+24 note alert
+A solstice fact (5 of 25)^L^L
+At the June solstice the Sun is straight overhead on the Tropic
+of Cancer, 23.4 degrees north; in December, on the Tropic of
+Capricorn. The names are 2,000 years old: today the Sun is in
+Taurus in June and in Sagittarius in December.
+
+25 note alert
+A solstice fact (6 of 25)^L^L
+On the equinox, day and night are not quite equal: the air bends
+the sunlight and the Sun is a disk, not a point, so the day is
+several minutes longer. The day of equal light and dark is the
+equilux, a few days before the March equinox and after the
+September one.
+
+26 note alert
+A solstice fact (7 of 25)^L^L
+The tilt itself changes, between about 22.1 and 24.5 degrees,
+over 41,000 years. It is 23.44 degrees now and slowly getting
+smaller.
+
+27 note alert
+A solstice fact (8 of 25)^L^L
+At the North Pole the Sun rises once a year, near the March
+equinox, and sets once, near the September equinox: six months
+of day, then six months of night.
+
+28 note alert
+A solstice fact (9 of 25)^L^L
+The Goseck circle in Germany, built about 4900 BC, had gates
+that framed the sunrise and sunset on the winter solstice:
+nearly 7,000 winter solstices ago.
+
+29 note alert
+A solstice fact (10 of 25)^L^L
+Newgrange in Ireland was built about 3200 BC, before
+Stonehenge's great stones and the pyramids of Giza. On the
+mornings around the winter solstice, sunlight enters a roof-box
+over the door and lights the inner chamber for about 17 minutes.
+
+30 note alert
+A solstice fact (11 of 25)^L^L
+Stonehenge lines up with the midsummer sunrise and the midwinter
+sunset. Its great sarsen stones went up about 2500 BC.
+
+31 note alert
+A solstice fact (12 of 25)^L^L
+Denmark's Trundholm sun chariot, about 3,400 years old, is a
+bronze horse pulling a disc that is gilded on one side, for day,
+and dark on the other, for night.
+
+32 note alert
+A solstice fact (13 of 25)^L^L
+Ohio's Serpent Mound, a quarter-mile earthen snake about 70
+miles east of Cincinnati, points its head toward the summer
+solstice sunset. Archaeologists still argue whether it is 2,300
+or 1,000 years old.
+
+33 note alert
+A solstice fact (14 of 25)^L^L
+At SunWatch, a village of about AD 1200 in Dayton, Ohio, posts
+in the plaza seem to mark the solstice sunrises: probably a
+calendar for planting.
+
+34 note alert
+A solstice fact (15 of 25)^L^L
+Early people could not be sure the Sun would come back. Watching
+it stop sinking lower at midwinter, and start to climb again,
+was a reason to celebrate.
+
+35 note alert
+A solstice fact (16 of 25)^L^L
+For early farmers in the north, January to April were the famine
+months. Cattle were slaughtered at midwinter so they need not be
+fed, making it almost the only time of fresh meat; and the
+year's wine and beer were finally ready.
+
+36 note alert
+A solstice fact (17 of 25)^L^L
+Evergreens were brought indoors at midwinter long before
+Christmas trees. Plants that stayed green while the Sun seemed
+to be dying were a sign that life, and the Sun, would come back.
+The custom is far older than any record of it.
+
+37 note alert
+A solstice fact (18 of 25)^L^L
+Rome's Saturnalia began on December 17 and grew into a week of
+feasting, gifts and games. Schools and shops closed, and masters
+served their slaves at dinner.
+
+38 note alert
+A solstice fact (19 of 25)^L^L
+Holly was hung over doors to keep out evil spirits, and the
+Romans decked their halls with it for Saturnalia.
+
+39 note alert
+A solstice fact (20 of 25)^L^L
+The earliest record of December 25 as Christmas is a Roman
+calendar of AD 354, in an entry dated 336. The same calendar
+marks December 25 as the birthday of the Unconquered Sun.
+
+40 note alert
+A solstice fact (21 of 25)^L^L
+The Yule log was burned with the year's mistakes so the new year
+started clean, and a piece was kept to light next year's log,
+for luck.
+
+41 note alert
+A solstice fact (22 of 25)^L^L
+Massachusetts banned Christmas from 1659 to 1681: anyone caught
+keeping it was fined five shillings. England's Parliament had
+banned it in 1647.
+
+42 note alert
+A solstice fact (23 of 25)^L^L
+In 1843 Charles Dickens wrote A Christmas Carol, which helped
+turn a rowdy holiday into one about family and charity.
+
+43 note alert
+A solstice fact (24 of 25)^L^L
+In 1851 Pastor Henry Schwan of Cleveland put up the first
+Christmas tree in an American church. A newspaper called it
+"groveling before a shrub". Today Americans buy 25 to 30 million
+real trees a year.
+
+44 note alert
+A solstice fact (25 of 25)^L^L
+Christmas became a US federal holiday on June 28, 1870, signed
+by President Grant, along with New Year's Day, the Fourth of
+July and Thanksgiving.
+
+0
+
+; ==== MENUS ===============================================================
+1
+File/Print
+Set Aside Everything
+Set Aside "LisaSolstice"
+-
+Save & Put Away
+
+2
+Clock
+Set Clock .../S
+Show Lisa Clock/C
+
+3
+Network
+Set from the Network/N
+-
+Use the FujiNet's Clock
+Use the Web, for Your Town
+Use the Web, for a Time Zone ...
+-
+Use 9600 baud
+Use 19200 baud
+
+4
+Seasons
+Days to the Next Season/D
+The Earth's Orbit/O
+The Earth's Tilt/E
+Where the Sun Is Now/W
+Day and Night Now/M
+Your Town/Y
+-
+Set Your Town ...
+Set Your Time Zone ...
+-
+A Fun Fact/F
+The Solargraph/G
+Solstice Traditions/L
+Pictures from History/P
+
+5
+Help
+How to Use/H
+About Twin Years/T
+
+6
+Version
+About LisaSolstice
+
+0
