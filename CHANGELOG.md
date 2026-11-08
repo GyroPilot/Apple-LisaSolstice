@@ -1,6 +1,8 @@
 # LisaSolstice changelog
 
-## 0.1 REV D -- 4 Nov 2026 -- RELEASE candidate
+## 1.0 REV E -- 7 Nov 2026 -- RELEASE
+- REV D released as 1.0 (Tim, 7 Nov): the version and the About box say 1.0 and 7 November 2026; no other change.
+## 0.1 REV D -- 4 Nov 2026 -- release candidate (became 1.0)
 - N: when the web (timeapi.io) gives no time, the FujiNet's / ESProFile's own clock is used and the window says so.
   (timeapi.io through ESPFuji 1.1b1 answers "connection refused".) About box: 4 November 2026.
 ## 0.1 REV C -- 3 Nov 2026 -- tested on the Lisa 2/10, 4 Nov

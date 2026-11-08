@@ -1,4 +1,4 @@
-LisaSolstice 0.1 (4 November 2026)      tool 419326      Tim O'Connor (bmwcyclist)
+LisaSolstice 1.0 (7 November 2026)      tool 419326      Tim O'Connor (bmwcyclist)
 
 The seasons on the Apple Lisa Office System: days to the next solstice or equinox and the next five coming up, the
 Earth's orbit and tilt today, where the Sun is overhead now, sunrise and sunset in your town, day and night on a
@@ -19,4 +19,4 @@ conversions are shared under the same licences); Serpent Mound postcard, Yule lo
 heavens (public domain).
 
 Tested on a Lisa 2/10 (3-4 Nov 2026: every page, the pictures at about 2.2 s each, the clock from an ESProFile running
-ESPFuji). Source (MIT for the code): github.com/GyroPilot/Apple-LisaSolstice
+ESPFuji); the web-clock fallback added since was tested in LisaEm. Source (MIT for the code): github.com/GyroPilot/Apple-LisaSolstice

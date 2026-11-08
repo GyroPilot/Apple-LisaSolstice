@@ -41,7 +41,7 @@ uses (*$U UnitStd.obj *)   UnitStd,
      (*$U FilerComm.obj *) FilerComm;
 
 const
-   solVersion = 'LisaSolstice 0.1';    { REV A 2-Nov-2026 }
+   solVersion = 'LisaSolstice 1.0';    { REV A 2-Nov-2026; 1.0 = REV E 7-Nov-2026 }
 
    winW = 660;                { the status window }
    winH = 300;
